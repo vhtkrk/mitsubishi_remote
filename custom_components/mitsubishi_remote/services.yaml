@@ -20,7 +20,7 @@ force_send:
             - heat
             - dry
             - auto
-            - off
+            - "off"
     temperature:
       name: Temperature
       description: Target temperature in Celsius (16-31).
