@@ -1,4 +1,8 @@
-"""Climate entity that drives a Mitsubishi AC through a Home Assistant remote entity."""
+"""Climate entity that drives a Mitsubishi MSZ-FD AC through a Home Assistant remote entity.
+
+IR_PROTOCOL.md in the repository root specifies the frame. The rules R1-R13
+that this module follows are in §4 of that document.
+"""
 
 from __future__ import annotations
 
@@ -11,18 +15,16 @@ from homeassistant.components.climate import (
     ClimateEntityFeature,
     HVACMode,
 )
-from homeassistant.const import ATTR_ENTITY_ID, ATTR_TEMPERATURE
+from homeassistant.const import ATTR_ENTITY_ID, ATTR_TEMPERATURE, UnitOfTemperature
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
 
 from .const import (
-    CONF_COMMAND_FORMAT,
-    CONF_HEX_PREFIX,
     CONF_INSTALL_POSITION,
+    CONF_NAME,
     CONF_REMOTE_ENTITY,
     CONF_REPEAT_GAP,
     CONF_RETRIES,
-    DEFAULT_COMMAND_FORMAT,
-    DEFAULT_HEX_PREFIX,
     DEFAULT_INSTALL_POSITION,
     DEFAULT_MAX_TEMP,
     DEFAULT_MIN_TEMP,
@@ -35,133 +37,122 @@ from .const import (
     SERVICE_FORCE_SEND,
 )
 from .mitsubishi_protocol import (
-    CleanMode,
-    ClimateMode,
-    FanMode,
-    InstallPosition,
-    ISeeMode,
-    PlasmaMode,
-    PowerMode,
-    PowerfulMode,
-    VanneHorizontalMode,
-    VanneVerticalMode,
+    Area,
+    Fan,
+    InstallPos,
+    Mode,
+    Vane,
+    WideVane,
     build_frame,
     modulate,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-# HA HVACMode -> protocol mode code
 HVAC_TO_MODE = {
-    HVACMode.AUTO: ClimateMode.AUTO,
-    HVACMode.COOL: ClimateMode.COLD,
-    HVACMode.DRY: ClimateMode.DRY,
-    HVACMode.HEAT: ClimateMode.HOT,
+    HVACMode.AUTO: Mode.AUTO,
+    HVACMode.COOL: Mode.COOL,
+    HVACMode.DRY: Mode.DRY,
+    HVACMode.HEAT: Mode.HEAT,
 }
 
-# Fan / swing values are deliberately HA's own lowercase vocabulary.
-#
-# The frontend looks these up in homeassistant/components/climate/icons.json by
-# exact string match (`getIconFromTranslations`), so a value that is not in that
-# map renders as the `default` fallback -- an unlabelled `mdi:circle-medium`
-# dot. The old labels ("Auto"/"Low"/"Med"/"High") matched nothing, which is
-# why every fan speed lost its icon. Note there is no "med" key either: HA's
-# map spells it "medium".
-FAN_MODES = ["auto", "low", "medium", "high"]
+# Option values. The frontend finds an icon and a label for each value through
+# the entity's translation_key in icons.json and translations/en.json. Fan
+# values reuse Home Assistant's own words where they exist.
 FAN_TO_CODE = {
-    "auto": FanMode.AUTO,
-    "low": FanMode.SPEED1,
-    "medium": FanMode.SPEED2,
-    "high": FanMode.SPEED3,
+    "auto": Fan.AUTO,
+    "low": Fan.LOW,
+    "medium": Fan.MED,
+    "high": Fan.HIGH,
+    "super_high": Fan.SUPER_HIGH,
 }
-CODE_TO_FAN = {code: label for label, code in FAN_TO_CODE.items()}
+FAN_MODES = list(FAN_TO_CODE)
 
-# Vertical vane: "off" parks it in Auto, "on" oscillates it (byte 9, bits 3-6).
-# "on"/"off" are the keys HA's icon map defines (mdi:arrow-oscillating /
-# mdi:arrow-oscillating-off); "swing" was not a key, hence the missing icon.
-SWING_MODES = ["off", "on"]
+# swing_mode is VANE: the up/down airflow.
 SWING_TO_VANE = {
-    "off": VanneVerticalMode.AUTO,
-    "on": VanneVerticalMode.SWING,
+    "auto": Vane.AUTO,
+    "pos1": Vane.POS1,
+    "pos2": Vane.POS2,
+    "pos3": Vane.POS3,
+    "pos4": Vane.POS4,
+    "pos5": Vane.POS5,
+    "swing": Vane.SWING,
+}
+SWING_MODES = list(SWING_TO_VANE)
+
+# swing_horizontal_mode is the left/right airflow. The remote controls it with
+# two buttons, AREA and WIDE VANE, but only one of them is active at a time
+# (rule R3). One option list therefore holds both.
+SWING_HORIZONTAL_TO_CODE: dict[str, tuple[Area, WideVane]] = {
+    "area_auto": (Area.AUTO, WideVane.NONE),
+    "area_left": (Area.LEFT, WideVane.NONE),
+    "area_right": (Area.RIGHT, WideVane.NONE),
+    "far_left": (Area.OFF, WideVane.FAR_LEFT),
+    "left": (Area.OFF, WideVane.LEFT),
+    "center": (Area.OFF, WideVane.CENTER),
+    "right": (Area.OFF, WideVane.RIGHT),
+    "far_right": (Area.OFF, WideVane.FAR_RIGHT),
+    "swing": (Area.OFF, WideVane.SWING),
+}
+SWING_HORIZONTAL_MODES = list(SWING_HORIZONTAL_TO_CODE)
+AREA_CHOICES = ("area_auto", "area_left", "area_right")
+DEFAULT_WIDE_VANE = "center"
+
+INSTALL_TO_CODE = {
+    "left": InstallPos.LEFT,
+    "center": InstallPos.CENTER,
+    "right": InstallPos.RIGHT,
 }
 
-# Horizontal ("wide") vane -- byte 8, bits 4-7. This is a *second*, independent
-# swing axis, which is exactly what HA's swing_horizontal_mode is for. HA's
-# icon map defines off/on for it, so we use the same two words.
-SWING_HORIZONTAL_MODES = ["off", "on"]
-SWING_HORIZONTAL_TO_VANE = {
-    "off": VanneHorizontalMode.NOT_SET,
-    "on": VanneHorizontalMode.SWING,
-}
-
-# Pre-0.2 values, still accepted so existing automations/scripts keep working.
-_FAN_ALIASES = {
-    "auto": "auto",
-    "low": "low",
-    "med": "medium",
-    "medium": "medium",
-    "mid": "medium",
-    "high": "high",
-}
-_SWING_ALIASES = {
-    "off": "off",
-    "auto": "off",
-    "on": "on",
-    "swing": "on",
-    "oscillate": "on",
-    "vertical": "on",
-}
+# Values from earlier versions. Home Assistant rejects unknown values in its
+# climate services, so these matter for restored state and force_send only.
+_FAN_ALIASES = {"med": "medium", "mid": "medium"}
+_SWING_ALIASES = {"off": "auto", "on": "swing", "oscillate": "swing", "vertical": "swing"}
 _SWING_HORIZONTAL_ALIASES = {
-    "off": "off",
-    "auto": "off",
-    "on": "on",
-    "swing": "on",
-    "oscillate": "on",
-    "horizontal": "on",
+    # "off" sent AREA=AUTO with WIDE_VANE=NONE, the same frame as "area_auto".
+    "off": "area_auto",
+    "auto": "area_auto",
+    "on": "swing",
+    "oscillate": "swing",
+    "horizontal": "swing",
 }
-
-# "left"/"middle"/"right" -> byte 15 bits 3-4.
-_INSTALL_TO_CODE = {
-    "left": InstallPosition.LEFT,
-    "middle": InstallPosition.MIDDLE,
-    "right": InstallPosition.RIGHT,
-}
+_INSTALL_ALIASES = {"middle": "center"}
 
 
-def normalise_fan_mode(value: Any) -> str | None:
-    """Map any accepted fan label to its canonical value (or None)."""
-    if value is None:
-        return None
-    return _FAN_ALIASES.get(str(value).strip().casefold())
-
-
-def normalise_swing_mode(value: Any) -> str | None:
-    """Map any accepted swing label to its canonical value (or None)."""
-    if value is None:
-        return None
-    return _SWING_ALIASES.get(str(value).strip().casefold())
-
-
-def normalise_swing_horizontal_mode(value: Any) -> str | None:
-    """Map any accepted horizontal-swing label to its canonical value."""
-    if value is None:
-        return None
-    return _SWING_HORIZONTAL_ALIASES.get(str(value).strip().casefold())
-
-
-def normalise_install_position(value: Any) -> str | None:
-    """Validate a configured install position (returns None if unset)."""
+def _normalise(value: Any, valid: dict, aliases: dict[str, str]) -> str | None:
+    """Return the canonical option for a value, or None if it is unknown."""
     if value is None:
         return None
     text = str(value).strip().casefold()
-    if text in ("", "none", "unset", "default"):
-        return None
-    if text not in _INSTALL_TO_CODE:
+    text = aliases.get(text, text)
+    return text if text in valid else None
+
+
+def normalise_fan_mode(value: Any) -> str | None:
+    """Map a fan label (current or legacy) to its canonical value."""
+    return _normalise(value, FAN_TO_CODE, _FAN_ALIASES)
+
+
+def normalise_swing_mode(value: Any) -> str | None:
+    """Map a swing label (current or legacy) to its canonical value."""
+    return _normalise(value, SWING_TO_VANE, _SWING_ALIASES)
+
+
+def normalise_swing_horizontal_mode(value: Any) -> str | None:
+    """Map a horizontal-swing label (current or legacy) to its canonical value."""
+    return _normalise(value, SWING_HORIZONTAL_TO_CODE, _SWING_HORIZONTAL_ALIASES)
+
+
+def normalise_install_position(value: Any) -> str:
+    """Return left, center or right. An empty value means the default (center)."""
+    if value is None or str(value).strip() == "":
+        return DEFAULT_INSTALL_POSITION
+    position = _normalise(value, INSTALL_TO_CODE, _INSTALL_ALIASES)
+    if position is None:
         raise ValueError(
-            f"install_position must be one of {INSTALL_POSITIONS} or unset, "
-            f"got {value!r}"
+            f"install_position must be one of {INSTALL_POSITIONS}, got {value!r}"
         )
-    return text
+    return position
 
 
 def _mode_value(mode: Any) -> str | None:
@@ -172,12 +163,11 @@ def _mode_value(mode: Any) -> str | None:
 
 
 class MitsubishiExtraStoredData(ExtraStoredData):
-    """Extra state that climate attributes alone cannot carry across restarts.
+    """State that the climate attributes alone cannot carry across restarts.
 
-    HA only persists `hvac_mode`, so `off` is all that survives a restart of the
-    *mode*; the mode the unit is actually in (heat/cool/dry/auto) would be lost
-    and power-on would have to guess. Keep it (plus the other settings) here so
-    the entity comes back exactly as the user left it.
+    Home Assistant only stores `hvac_mode`, so an `off` entity would forget the
+    mode that it returns to (heat/cool/dry/auto). It would also forget the
+    WIDE_VANE position that an AREA choice hides.
     """
 
     def __init__(
@@ -189,6 +179,7 @@ class MitsubishiExtraStoredData(ExtraStoredData):
         fan_mode: str | None,
         swing_mode: str | None,
         swing_horizontal_mode: str | None = None,
+        last_wide_vane: str | None = None,
     ) -> None:
         self.active_mode = active_mode
         self.hvac_mode = hvac_mode
@@ -196,6 +187,7 @@ class MitsubishiExtraStoredData(ExtraStoredData):
         self.fan_mode = fan_mode
         self.swing_mode = swing_mode
         self.swing_horizontal_mode = swing_horizontal_mode
+        self.last_wide_vane = last_wide_vane
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable representation of the state."""
@@ -206,11 +198,12 @@ class MitsubishiExtraStoredData(ExtraStoredData):
             "fan_mode": self.fan_mode,
             "swing_mode": self.swing_mode,
             "swing_horizontal_mode": self.swing_horizontal_mode,
+            "last_wide_vane": self.last_wide_vane,
         }
 
 
 class MitsubishiRemoteClimate(ClimateEntity, RestoreEntity):
-    """A climate entity that encodes Mitsubishi frames and fires remote.send_command."""
+    """A climate entity that encodes Mitsubishi frames and calls remote.send_command."""
 
     _attr_hvac_modes = [
         HVACMode.OFF,
@@ -225,106 +218,104 @@ class MitsubishiRemoteClimate(ClimateEntity, RestoreEntity):
     _attr_min_temp = DEFAULT_MIN_TEMP
     _attr_max_temp = DEFAULT_MAX_TEMP
     _attr_target_temperature_step = 1
-    _attr_temperature_unit = None  # set in __init__
+    _attr_temperature_unit = UnitOfTemperature.CELSIUS
+    _attr_translation_key = "mitsubishi_ac"
+    _attr_supported_features = (
+        ClimateEntityFeature.TARGET_TEMPERATURE
+        | ClimateEntityFeature.FAN_MODE
+        | ClimateEntityFeature.SWING_MODE
+        | ClimateEntityFeature.SWING_HORIZONTAL_MODE
+    )
 
     def __init__(
         self,
         *,
         remote_entity: str,
         name: str,
-        command_format: str,
-        hex_prefix: bool,
         retries: int,
         repeat_gap: float,
         install_position: str | None = DEFAULT_INSTALL_POSITION,
     ) -> None:
-        from homeassistant.const import UnitOfTemperature
-
         self._remote_entity = remote_entity
         self._attr_name = name
         self._attr_unique_id = f"mitsubishi_remote_{remote_entity.replace('.', '_')}"
-        self._command_format = command_format
-        self._hex_prefix = hex_prefix
         self._retries = max(1, int(retries))
         self._repeat_gap = max(0.0, float(repeat_gap))
-
-        # One-time installer setting (byte 15 bits 3-4). None = leave byte 15
-        # alone, which keeps the frame byte-identical to previous versions.
         self._install_position = normalise_install_position(install_position)
-
-        self._attr_temperature_unit = UnitOfTemperature.CELSIUS
-        self._attr_supported_features = (
-            ClimateEntityFeature.TARGET_TEMPERATURE
-            | ClimateEntityFeature.FAN_MODE
-            | ClimateEntityFeature.SWING_MODE
-            | ClimateEntityFeature.SWING_HORIZONTAL_MODE
-        )
 
         self._attr_hvac_mode = HVACMode.OFF
         self._attr_target_temperature = 24
         self._attr_fan_mode = "auto"
-        self._attr_swing_mode = "off"
-        self._attr_swing_horizontal_mode = "off"
+        self._attr_swing_mode = "auto"
+        self._attr_swing_horizontal_mode = "area_auto"
+        # The WIDE_VANE position to use when no AREA choice is active (rule R5).
+        self._last_wide_vane = DEFAULT_WIDE_VANE
         self._power = False
-        # Mode used to build the frame while the unit is off/powered back on.
-        # Preserved across restarts so power-on returns to the real mode.
+        # The mode that power-on returns to. It is stored across restarts.
         self._active_mode: HVACMode = HVACMode.COOL
 
-        # Independent on/off features (i-see / clean / plasma). The climate
-        # entity owns them because it owns the frame and the transport; the
-        # switch entities in switch.py just set a bit and ask us to transmit.
-        # Defaults match the frame this integration has always sent.
+        # i-see / clean / plasma. This entity owns them because it owns the
+        # frame and the transport. The switches in switch.py call
+        # `async_set_feature`.
         self.feature_states: dict[str, bool] = dict(FEATURE_DEFAULTS)
 
     # -- helpers ----------------------------------------------------------
 
-    def _current_code(self) -> bytes:
-        mode_code = HVAC_TO_MODE.get(self._active_mode, ClimateMode.COLD)
-        fan_code = FAN_TO_CODE.get(normalise_fan_mode(self.fan_mode), FanMode.AUTO)
-        vane = SWING_TO_VANE.get(
-            normalise_swing_mode(self.swing_mode), VanneVerticalMode.AUTO
-        )
-        vane_h = SWING_HORIZONTAL_TO_VANE.get(
-            normalise_swing_horizontal_mode(self.swing_horizontal_mode),
-            VanneHorizontalMode.NOT_SET,
-        )
-        return build_frame(
-            climate_mode=mode_code,
-            temperature=self.target_temperature or 24,
-            fan_mode=fan_code,
-            vanne_vertical_mode=vane,
-            vanne_horizontal_mode=vane_h,
-            install_position=(
-                _INSTALL_TO_CODE[self._install_position]
-                if self._install_position
-                else None
-            ),
-            powerful=PowerfulMode.OFF,
-            isee_mode=self._isee_code(),
-            clean_mode=self._clean_code(),
-            plasma_mode=self._plasma_code(),
-            power_mode=PowerMode.ON if self._power else PowerMode.OFF,
-        )
+    @property
+    def swing_horizontal_mode(self) -> str:
+        """Return the left/right airflow choice.
+
+        Rule R4: AREA needs i-see. Without i-see, the stored WIDE_VANE
+        position applies instead of an AREA choice.
+        """
+        choice = self._attr_swing_horizontal_mode
+        if choice in AREA_CHOICES and not self._feature("isee"):
+            return self._last_wide_vane
+        return choice
 
     def _feature(self, key: str) -> bool:
         """Return a feature's current state, falling back to its default."""
         return bool(self.feature_states.get(key, FEATURE_DEFAULTS[key]))
 
-    def _isee_code(self) -> int:
-        return ISeeMode.ON if self._feature("isee") else ISeeMode.OFF
+    def _current_code(self, **overrides: Any) -> bytes:
+        """Encode the current state. `overrides` replace build_frame fields."""
+        area, wide_vane = SWING_HORIZONTAL_TO_CODE[self.swing_horizontal_mode]
+        fields: dict[str, Any] = {
+            "power": self._power,
+            "mode": HVAC_TO_MODE.get(self._active_mode, Mode.COOL),
+            "temperature": self.target_temperature or 24,
+            "fan": FAN_TO_CODE.get(normalise_fan_mode(self.fan_mode), Fan.AUTO),
+            "vane": SWING_TO_VANE.get(normalise_swing_mode(self.swing_mode), Vane.AUTO),
+            "wide_vane": wide_vane,
+            "area": area,
+            "isee": self._feature("isee"),
+            "install_pos": INSTALL_TO_CODE[self._install_position],
+            "clean": self._feature("clean"),
+            "plasma": self._feature("plasma"),
+        }
+        fields.update(overrides)
+        return build_frame(**fields)
 
-    def _clean_code(self) -> int:
-        return CleanMode.ON if self._feature("clean") else CleanMode.OFF
+    async def async_set_feature(self, key: str, value: bool) -> None:
+        """Set i-see, clean or plasma, then transmit if the unit is on.
 
-    def _plasma_code(self) -> int:
-        return PlasmaMode.ON if self._feature("plasma") else PlasmaMode.OFF
+        Rules R4 and R5: when i-see turns off, an AREA choice changes to the
+        stored WIDE_VANE position.
+        """
+        self.feature_states[key] = value
+        if (
+            key == "isee"
+            and not value
+            and self._attr_swing_horizontal_mode in AREA_CHOICES
+        ):
+            self._attr_swing_horizontal_mode = self._last_wide_vane
+        await self.async_send_current_state()
 
     async def async_send_current_state(self) -> None:
-        """Re-transmit the current state (used by the feature switches).
+        """Transmit the current state if the unit is on, then update the UI.
 
-        Like every other setter here this only transmits when the unit is on:
-        the frame carries a power bit, so sending while "off" would both wake
-        the unit and change its mode.
+        The frame carries the power bit, so a transmission while the unit is
+        off would turn it on.
         """
         if self._power:
             await self._send(self._current_code())
@@ -338,39 +329,28 @@ class MitsubishiRemoteClimate(ClimateEntity, RestoreEntity):
         fan_mode: str,
         power: bool = True,
     ) -> None:
-        """Encode and send an arbitrary command (used by the debug service)."""
+        """Encode and send a frame for the debug service.
+
+        VANE is AUTO. The other fields keep the entity's current state.
+        """
         power = power and hvac_mode != HVACMode.OFF
-        mode_code = HVAC_TO_MODE.get(hvac_mode, ClimateMode.COLD)
-        fan_code = FAN_TO_CODE.get(normalise_fan_mode(fan_mode), FanMode.AUTO)
-        frame = build_frame(
-            climate_mode=mode_code,
+        mode = HVAC_TO_MODE.get(hvac_mode, HVAC_TO_MODE.get(self._active_mode, Mode.COOL))
+        frame = self._current_code(
+            power=power,
+            mode=mode,
             temperature=temperature,
-            fan_mode=fan_code,
-            vanne_vertical_mode=VanneVerticalMode.AUTO,
-            vanne_horizontal_mode=VanneHorizontalMode.NOT_SET,
-            install_position=(
-                _INSTALL_TO_CODE[self._install_position]
-                if self._install_position
-                else None
-            ),
-            powerful=PowerfulMode.OFF,
-            isee_mode=self._isee_code(),
-            clean_mode=self._clean_code(),
-            plasma_mode=self._plasma_code(),
-            power_mode=PowerMode.ON if power else PowerMode.OFF,
+            fan=FAN_TO_CODE.get(normalise_fan_mode(fan_mode), Fan.AUTO),
+            vane=Vane.AUTO,
         )
         await self._send(frame)
 
     async def _send(self, frame: bytes) -> None:
-        # LocalTuyaIR's `remote.send_command` expects the code in one of its
-        # documented formats (`raw:` timing list, protocol params, or `tuya:`
-        # Base64). Mitsubishi is not one of the supported built-in protocols,
-        # so send the pulse timings in the raw format.
-        pulses = modulate(frame)
-        payload = "raw:" + ",".join(str(p) for p in pulses)
+        # LocalTuyaIR's `remote.send_command` has no built-in Mitsubishi
+        # protocol, so the frame goes out as a raw timing list.
+        payload = "raw:" + ",".join(str(p) for p in modulate(frame))
 
-        # LocalTuyaIR / Tuya IR blasters are known to drop packets, so we
-        # resend a few times with a small gap.
+        # Tuya IR blasters sometimes drop a transmission, so send it again
+        # after a short gap.
         for attempt in range(self._retries):
             try:
                 await self.hass.services.async_call(
@@ -382,7 +362,7 @@ class MitsubishiRemoteClimate(ClimateEntity, RestoreEntity):
                     },
                     blocking=True,
                 )
-            except Exception:  # noqa: BLE001 - surface and retry
+            except Exception:  # noqa: BLE001 - log and retry
                 _LOGGER.exception(
                     "Failed to send IR command (attempt %d/%d)",
                     attempt + 1,
@@ -397,16 +377,12 @@ class MitsubishiRemoteClimate(ClimateEntity, RestoreEntity):
         if hvac_mode == HVACMode.OFF:
             self._power = False
             self._attr_hvac_mode = HVACMode.OFF
-            # The FD remote's power-off frame is just the current state with the
-            # power bit (byte 5) cleared -- learned capture: 23CB2601 00 00 48 06
-            # 00 69 53 ... is heat/22/fan-low still encoded. Sending a hardcoded
-            # AUTO @ 21 wipes the mode byte and the unit's real settings.
+            # Rule R1: the power-off frame is the full state with POWER = 0.
+            # It also carries CLEAN, which the unit reads when it stops (R8).
             await self._send(self._current_code())
         else:
             self._power = True
-            # Update the mode BEFORE encoding: _current_code() reads the mode,
-            # so setting it afterwards sent a frame still tagged with the old
-            # mode (cool -> heat transmitted as cool).
+            # Set the mode before encoding: _current_code() reads it.
             self._active_mode = HVACMode(hvac_mode)
             self._attr_hvac_mode = HVACMode(hvac_mode)
             await self._send(self._current_code())
@@ -420,25 +396,31 @@ class MitsubishiRemoteClimate(ClimateEntity, RestoreEntity):
         self.async_write_ha_state()
 
     async def async_set_fan_mode(self, fan_mode: str) -> None:
-        # Accept legacy capitalised labels ("High"/"Med") from older
-        # automations, but always store HA's canonical value so the icon map
-        # resolves and the selector shows the right option highlighted.
         self._attr_fan_mode = normalise_fan_mode(fan_mode) or "auto"
         if self._power:
             await self._send(self._current_code())
         self.async_write_ha_state()
 
     async def async_set_swing_mode(self, swing_mode: str) -> None:
-        self._attr_swing_mode = normalise_swing_mode(swing_mode) or "off"
+        """Set VANE (up/down airflow)."""
+        self._attr_swing_mode = normalise_swing_mode(swing_mode) or "auto"
         if self._power:
             await self._send(self._current_code())
         self.async_write_ha_state()
 
     async def async_set_swing_horizontal_mode(self, swing_horizontal_mode: str) -> None:
-        """Wide-vane control (byte 8, bits 4-7) -- an independent axis."""
-        self._attr_swing_horizontal_mode = (
-            normalise_swing_horizontal_mode(swing_horizontal_mode) or "off"
+        """Set AREA or WIDE_VANE (left/right airflow)."""
+        choice = (
+            normalise_swing_horizontal_mode(swing_horizontal_mode)
+            or self.swing_horizontal_mode
         )
+        if choice in AREA_CHOICES and not self._feature("isee"):
+            raise ServiceValidationError(
+                f"{choice} needs i-see. Turn on the I-See switch first."
+            )
+        if choice not in AREA_CHOICES:
+            self._last_wide_vane = choice
+        self._attr_swing_horizontal_mode = choice
         if self._power:
             await self._send(self._current_code())
         self.async_write_ha_state()
@@ -455,10 +437,11 @@ class MitsubishiRemoteClimate(ClimateEntity, RestoreEntity):
             fan_mode=self._attr_fan_mode,
             swing_mode=self._attr_swing_mode,
             swing_horizontal_mode=self._attr_swing_horizontal_mode,
+            last_wide_vane=self._last_wide_vane,
         )
 
     async def async_added_to_hass(self) -> None:
-        """Restore the last known state after a restart or reboot."""
+        """Restore the last known state after a restart. Send no IR."""
         await super().async_added_to_hass()
 
         extra = await self.async_get_last_extra_data()
@@ -491,9 +474,8 @@ class MitsubishiRemoteClimate(ClimateEntity, RestoreEntity):
                     DEFAULT_MIN_TEMP, min(DEFAULT_MAX_TEMP, temp)
                 )
 
-        # Normalise rather than compare against FAN_MODES/SWING_MODES: state
-        # persisted by an older version holds "High"/"swing", which must be
-        # migrated instead of silently dropped back to the default.
+        # Normalise instead of comparing with the option lists: older versions
+        # stored values such as "High", "on" and "off".
         if fan := normalise_fan_mode(stored.get("fan_mode", attrs.get("fan_mode"))):
             self._attr_fan_mode = fan
 
@@ -503,15 +485,18 @@ class MitsubishiRemoteClimate(ClimateEntity, RestoreEntity):
             self._attr_swing_mode = swing
 
         if swing_h := normalise_swing_horizontal_mode(
-            stored.get(
-                "swing_horizontal_mode", attrs.get("swing_horizontal_mode")
-            )
+            stored.get("swing_horizontal_mode", attrs.get("swing_horizontal_mode"))
         ):
             self._attr_swing_horizontal_mode = swing_h
 
-        # Deliberately no IR transmission here: the link is one-way (blind
-        # blaster), so sending at startup would only blast the unit and undo
-        # any change made with the wall remote while HA was down.
+        last_wide = normalise_swing_horizontal_mode(stored.get("last_wide_vane"))
+        if last_wide and last_wide not in AREA_CHOICES:
+            self._last_wide_vane = last_wide
+        elif swing_h and swing_h not in AREA_CHOICES:
+            self._last_wide_vane = swing_h
+
+        # No IR here. The link is one-way, so a transmission at startup would
+        # undo any change made with the handheld remote while HA was down.
         _LOGGER.info(
             "%s restored: mode=%s temp=%s fan=%s swing=%s swing_h=%s (no IR sent)",
             self.entity_id,
@@ -524,13 +509,11 @@ class MitsubishiRemoteClimate(ClimateEntity, RestoreEntity):
 
 
 async def _async_register_force_send(hass) -> None:
-    """Register `mitsubishi_remote.force_send` exactly once.
+    """Register `mitsubishi_remote.force_send` once.
 
-    For a legacy YAML platform HA only calls the `async_setup_platform` in
-    *this* file -- the one in `__init__.py` is never executed, which is why the
-    service used to be missing despite being registered there and documented in
-    services.yaml. Registering here, guarded by `has_service`, also survives
-    YAML reloads without "service already registered" errors.
+    Home Assistant calls `async_setup_platform` in this file for a YAML
+    platform, so the service is registered here. The `has_service` guard
+    keeps a YAML reload from registering it twice.
     """
     if hass.services.has_service(DOMAIN, SERVICE_FORCE_SEND):
         return
@@ -541,9 +524,9 @@ async def _async_register_force_send(hass) -> None:
         if isinstance(entity_ids, str):
             entity_ids = [entity_ids]
 
-        # Reloading the YAML platform appends a new entity object without
-        # evicting the old one, so keep only the newest per entity_id to avoid
-        # blasting every command twice after each reload.
+        # A YAML reload appends a new entity object without removing the old
+        # one. Keep only the newest object per entity_id, so that each call
+        # sends one command.
         newest: dict[str, Any] = {}
         for entity in hass.data.get(DOMAIN, []):
             newest[entity.entity_id] = entity
@@ -582,34 +565,23 @@ async def async_setup_platform(
     """Set up the Mitsubishi climate platform from a YAML `climate:` block."""
     from homeassistant.helpers.discovery import async_load_platform
 
-    from .const import CONF_NAME
-
     entity = MitsubishiRemoteClimate(
         remote_entity=config[CONF_REMOTE_ENTITY],
         name=config.get(CONF_NAME, DEFAULT_NAME),
-        command_format=config.get(CONF_COMMAND_FORMAT, DEFAULT_COMMAND_FORMAT),
-        hex_prefix=config.get(CONF_HEX_PREFIX, DEFAULT_HEX_PREFIX),
         retries=config.get(CONF_RETRIES, DEFAULT_RETRIES),
         repeat_gap=config.get(CONF_REPEAT_GAP, DEFAULT_REPEAT_GAP),
-        install_position=config.get(
-            CONF_INSTALL_POSITION, DEFAULT_INSTALL_POSITION
-        ),
+        install_position=config.get(CONF_INSTALL_POSITION, DEFAULT_INSTALL_POSITION),
     )
-    # Hand the feature switches over to the switch platform. They are created
-    # here because this entity owns the frame and the transport; `switch:` has
-    # no YAML entry of its own.
+    # The feature switches belong to this entity, so this platform creates
+    # them. `switch:` has no YAML entry of its own.
     hass.async_create_task(
         async_load_platform(hass, "switch", DOMAIN, {"climate": entity}, config)
     )
 
-    # Keep a reference so the domain service can reach the entity/entities.
-    #
-    # No de-duplication here: at this point `entity.entity_id` is still
-    # `unknown.unknown` (HA assigns the real id when the entity is added), so
-    # filtering the list now would drop a legitimately-configured second AC.
-    # Stale objects from a YAML reload are collapsed by entity_id at call time
-    # in `_async_register_force_send` instead.
+    # Keep a reference for the domain service. Do not de-duplicate here: the
+    # entity_id is still `unknown.unknown` at this point. The service removes
+    # stale objects by entity_id when it runs.
     hass.data.setdefault(DOMAIN, []).append(entity)
-    async_add_entities([entity], update_before_add=False)   # callback, not coroutine
+    async_add_entities([entity], update_before_add=False)
 
     await _async_register_force_send(hass)

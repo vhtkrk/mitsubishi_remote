@@ -1,20 +1,21 @@
 """Regression tests for the i-see / clean / plasma switch entities.
 
 Covers the three feature bits, the climate entity's ownership of them, the
-`async_load_platform` hand-off that creates the switches, and restoration
-(which must never transmit).
+`async_load_platform` hand-off that creates the switches, restoration (which
+must never transmit), and rule R4: i-see off cancels an AREA choice.
 
 Run with:
-    uv run --with 'homeassistant==2025.1.4' python tests/verify_features.py
+    uv run --python 3.13 --with 'homeassistant==2025.1.4' python tests/verify_features.py
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
+from datetime import time
+from pathlib import Path
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from custom_components.mitsubishi_remote.climate import (  # noqa: E402
     MitsubishiRemoteClimate,
@@ -25,16 +26,11 @@ from custom_components.mitsubishi_remote.const import (  # noqa: E402
     FEATURE_KEYS,
 )
 from custom_components.mitsubishi_remote.mitsubishi_protocol import (  # noqa: E402
-    CleanMode,
-    ClimateMode,
-    FanMode,
-    ISeeMode,
-    PlasmaMode,
-    PowerfulMode,
-    InstallPosition,
-    VanneVerticalMode,
+    Area,
+    InstallPos,
+    Mode,
+    WideVane,
     build_frame,
-    validate_byte15_fields,
 )
 from custom_components.mitsubishi_remote.switch import (  # noqa: E402
     FEATURES,
@@ -55,16 +51,19 @@ def checksum_ok(frame: bytes) -> bool:
     return frame[17] == sum(frame[:17]) % 256
 
 
-def build(**kw):
-    opts = {"clock": 0}
-    opts.update(kw)
-    return build_frame(
-        climate_mode=ClimateMode.COLD,
-        temperature=24,
-        fan_mode=FanMode.AUTO,
-        vanne_vertical_mode=VanneVerticalMode.AUTO,
-        **opts,
-    )
+def build(**kw) -> bytes:
+    """COOL 24 with all three features on and WIDE_VANE = CENTER, with `kw` changed.
+
+    WIDE_VANE (not AREA) is active, so i-see can turn off without breaking
+    rule R4 (IR_PROTOCOL.md §4).
+    """
+    fields: dict = {
+        "power": True, "mode": Mode.COOL, "temperature": 24, "clock": time(0, 0),
+        "area": Area.OFF, "wide_vane": WideVane.CENTER,
+        "isee": True, "clean": True, "plasma": True,
+    }
+    fields.update(kw)
+    return build_frame(**fields)
 
 
 # --- fakes -----------------------------------------------------------------
@@ -105,8 +104,6 @@ def make_climate(**kw) -> MitsubishiRemoteClimate:
     entity = MitsubishiRemoteClimate(
         remote_entity="remote.blaster",
         name="Study AC",
-        command_format="hex",
-        hex_prefix=False,
         retries=1,
         repeat_gap=0.0,
         **kw,
@@ -137,25 +134,29 @@ def frames_sent(climate) -> list:
     return [c[2]["command"] for c in climate.hass.services.calls]
 
 
+def decode_first_frame(payload: str) -> bytes:
+    """Turn a `raw:` pulse list back into the bytes of its first frame."""
+    pulses = [int(p) for p in payload.removeprefix("raw:").split(",")]
+    bits = pulses[2:]  # skip HDR_MARK, HDR_SPACE
+    frame = bytearray()
+    for i in range(0, 18 * 16, 16):
+        frame.append(sum((bits[i + b * 2 + 1] > 800) << b for b in range(8)))
+    return bytes(frame)
+
+
 # --- tests -----------------------------------------------------------------
 
 def test_bit_values() -> None:
-    check("i-see is byte 6 bit 6", ISeeMode.ON == 0x40)
-    check("clean is byte 14 bit 2", CleanMode.ON == 0x04)
-    check("clean base is 0x10", CleanMode.BASE == 0x10)
-    check("plasma ON is byte 15 bit 6", PlasmaMode.ON == 0x40)
-
     on = build()
-    off = build(isee_mode=ISeeMode.OFF, clean_mode=CleanMode.OFF,
-                plasma_mode=PlasmaMode.OFF)
+    off = build(isee=False, clean=False, plasma=False)
     check("i-see on sets b6 bit6", on[6] & 0x40 == 0x40, f"b6 {on[6]:#04x}")
     check("i-see off clears b6 bit6", off[6] & 0x40 == 0, f"b6 {off[6]:#04x}")
     check("clean on sets b14 bit2", on[14] & 0x04 == 0x04, f"b14 {on[14]:#04x}")
     check("clean off clears b14 bit2", off[14] & 0x04 == 0, f"b14 {off[14]:#04x}")
     check("plasma on sets b15 bit6", on[15] & 0x40 == 0x40, f"b15 {on[15]:#04x}")
     check("plasma off clears b15 bit6", off[15] & 0x40 == 0, f"b15 {off[15]:#04x}")
-    check("feature bits never touch each other's bytes",
-          off[14] == 0x10 and on[14] == 0x14)
+    check("byte 14 keeps INSTALL_POS = CENTER (0x10) under CLEAN",
+          off[14] == 0x10 and on[14] == 0x14, f"{off[14]:#04x} {on[14]:#04x}")
     check("checksums valid", checksum_ok(on) and checksum_ok(off))
 
 
@@ -163,9 +164,9 @@ def test_each_bit_independent() -> None:
     """Toggling one feature must change exactly one byte."""
     base = build()
     combos = {
-        "isee": build(isee_mode=ISeeMode.OFF),
-        "clean": build(clean_mode=CleanMode.OFF),
-        "plasma": build(plasma_mode=PlasmaMode.OFF),
+        "isee": build(isee=False),
+        "clean": build(clean=False),
+        "plasma": build(plasma=False),
     }
     for key, frame in combos.items():
         changed = [i for i in range(17) if frame[i] != base[i]]
@@ -176,21 +177,11 @@ def test_each_bit_independent() -> None:
         check(f"{key} off keeps checksum valid", checksum_ok(frame))
 
 
-def test_byte15_validator() -> None:
-    try:
-        validate_byte15_fields()
-        check("validate_byte15_fields passes", True)
-    except ValueError as exc:  # pragma: no cover
-        check("validate_byte15_fields passes", False, str(exc))
-
-    try:
-        build(install_position=InstallPosition.LEFT, powerful=PowerfulMode.ON)
-        check("powerful+install LEFT collision rejected", False, "no error")
-    except ValueError:
-        check("powerful+install LEFT collision rejected", True)
-
-    ok = build(install_position=InstallPosition.MIDDLE)
-    check("install MIDDLE keeps plasma bit", ok[15] & 0x40 == 0x40)
+def test_byte15_only_plasma() -> None:
+    for pos in InstallPos:
+        f = build(install_pos=pos)
+        check(f"INSTALL_POS {pos.name} leaves byte 15 = PLASMA only", f[15] == 0x40,
+              f"b15 {f[15]:#04x}")
 
 
 def test_climate_owns_features() -> None:
@@ -345,18 +336,7 @@ async def _force_send() -> None:
     )
     sent = frames_sent(climate)
     check("force_send transmitted", len(sent) == 1, str(len(sent)))
-    # decode the raw: payload back into bytes to check the plasma bit
-    pulses = [int(p) for p in sent[0].removeprefix("raw:").split(",")]
-    # 18 bytes, 8 bits each = 144 bit pairs after the 2-pulse header
-    bits = pulses[2:]
-    frame = bytearray()
-    for i in range(0, 18 * 16, 16):
-        byte = 0
-        for b in range(8):
-            space = bits[i + b * 2 + 1]
-            if space > 800:  # ONE_SPACE = 1300, ZERO_SPACE = 420
-                byte |= 1 << b
-        frame.append(byte)
+    frame = decode_first_frame(sent[0])
     check("force_send byte15 has plasma cleared", frame[15] & 0x40 == 0,
           f"b15 {frame[15]:#04x} frame {bytes(frame).hex()}")
     check("force_send still carries i-see and clean",
@@ -364,16 +344,40 @@ async def _force_send() -> None:
           f"b6 {frame[6]:#04x} b14 {frame[14]:#04x}")
 
 
+def test_isee_off_cancels_area() -> None:
+    asyncio.run(_isee_off_cancels_area())
+
+
+async def _isee_off_cancels_area() -> None:
+    climate = make_climate()
+    climate._power = True
+    check("default left/right airflow is area_auto",
+          climate.swing_horizontal_mode == "area_auto")
+    sw = make_switch(climate, "isee")
+    await sw.async_added_to_hass()
+    await sw.async_turn_off()
+    check("i-see switch off -> climate falls back to WIDE_VANE center (R4, R5)",
+          climate.swing_horizontal_mode == "center", climate.swing_horizontal_mode)
+    frame = decode_first_frame(frames_sent(climate)[-1])
+    check("frame: ISEE 0, AREA OFF, WIDE_VANE CENTER",
+          frame[6] & 0x40 == 0 and frame[13] & 0xC0 == 0 and frame[8] & 0xF0 == 0x30,
+          frame.hex(" "))
+    await sw.async_turn_on()
+    check("i-see back on keeps the WIDE_VANE choice",
+          climate.swing_horizontal_mode == "center", climate.swing_horizontal_mode)
+
+
 def main() -> int:
     test_bit_values()
     test_each_bit_independent()
-    test_byte15_validator()
+    test_byte15_only_plasma()
     test_climate_owns_features()
     test_switch_entities()
     test_switch_transmits()
     test_switch_restore()
     test_switch_platform_handoff()
     test_force_send_includes_features()
+    test_isee_off_cancels_area()
 
     failed = [name for ok, name in RESULTS if not ok]
     print()

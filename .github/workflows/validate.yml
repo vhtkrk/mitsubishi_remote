@@ -17,7 +17,7 @@ jobs:
         run: |
           for t in tests/verify_*.py; do
             echo "== $t =="
-            uv run --with 'homeassistant==2025.1.4' python "$t"
+            uv run --python 3.13 --with 'homeassistant==2025.1.4' python "$t"
           done
 
   hassfest:

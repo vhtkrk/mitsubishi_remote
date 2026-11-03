@@ -1,0 +1,968 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>MSZ-FD25VA Frame Builder</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;600;700&family=Source+Sans+3:wght@400;600;700&display=swap">
+<style>
+/* Layout: the remote's controls on the left, the 18-byte frame (LCD hex strip, inspector, bit grid, IR pulse train) on the right. One column on phones. */
+:root {
+  --bg: #e7eae8;
+  --surface: #f6f7f5;
+  --surface-2: #dde2df;
+  --ink: #1b2120;
+  --muted: #59635f;
+  --line: #c2c9c5;
+  --lcd: #c5cfbb;
+  --lcd-ink: #1e2a1b;
+  --lcd-dim: #6f7c68;
+  --accent: #0c6b87;
+  --accent-ink: #ffffff;
+  --hi: #e0a100;
+  --hi-soft: rgba(224, 161, 0, 0.26);
+  --g-core: #3864c9;  --t-core: rgba(56, 100, 201, 0.14);
+  --g-air: #23885a;   --t-air: rgba(35, 136, 90, 0.14);
+  --g-feat: #7d4cc0;  --t-feat: rgba(125, 76, 192, 0.14);
+  --g-time: #b9661a;  --t-time: rgba(185, 102, 26, 0.15);
+  --g-sum: #b8394f;   --t-sum: rgba(184, 57, 79, 0.14);
+  --g-const: #7b8580; --t-const: rgba(123, 133, 128, 0.14);
+  --ok: #2e7d4a;
+  --warn: #9a6512;
+  --bad: #b03a2e;
+  --font-display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --font-body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121716; --surface: #1a201e; --surface-2: #232a28; --ink: #e4eae7; --muted: #98a39e; --line: #333d39;
+    --lcd: #26301f; --lcd-ink: #cde6b4; --lcd-dim: #7f9470;
+    --accent: #4fb2cf; --accent-ink: #081a20; --hi: #ffc93d; --hi-soft: rgba(255, 201, 61, 0.22);
+    --g-core: #7ea4f5; --t-core: rgba(126, 164, 245, 0.18);
+    --g-air: #4fc58c;  --t-air: rgba(79, 197, 140, 0.17);
+    --g-feat: #b590f0; --t-feat: rgba(181, 144, 240, 0.18);
+    --g-time: #f0a35a; --t-time: rgba(240, 163, 90, 0.17);
+    --g-sum: #f27a90;  --t-sum: rgba(242, 122, 144, 0.17);
+    --g-const: #85908b; --t-const: rgba(133, 144, 139, 0.16);
+    --ok: #63c487; --warn: #e2b04f; --bad: #f08273;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121716; --surface: #1a201e; --surface-2: #232a28; --ink: #e4eae7; --muted: #98a39e; --line: #333d39;
+  --lcd: #26301f; --lcd-ink: #cde6b4; --lcd-dim: #7f9470;
+  --accent: #4fb2cf; --accent-ink: #081a20; --hi: #ffc93d; --hi-soft: rgba(255, 201, 61, 0.22);
+  --g-core: #7ea4f5; --t-core: rgba(126, 164, 245, 0.18);
+  --g-air: #4fc58c;  --t-air: rgba(79, 197, 140, 0.17);
+  --g-feat: #b590f0; --t-feat: rgba(181, 144, 240, 0.18);
+  --g-time: #f0a35a; --t-time: rgba(240, 163, 90, 0.17);
+  --g-sum: #f27a90;  --t-sum: rgba(242, 122, 144, 0.17);
+  --g-const: #85908b; --t-const: rgba(133, 144, 139, 0.16);
+  --ok: #63c487; --warn: #e2b04f; --bad: #f08273;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 15px/1.5 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+.page { max-width: 1240px; margin: 0 auto; display: grid; gap: 20px; }
+h1, h2, h3, legend, .label {
+  font-family: var(--font-display);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+h1 { margin: 0; font-size: clamp(1.7rem, 3.4vw, 2.4rem); font-weight: 700; line-height: 1.05; text-wrap: balance; }
+h2 { margin: 0; font-size: 1.05rem; font-weight: 700; color: var(--muted); }
+.lede { margin: 6px 0 0; max-width: 68ch; color: var(--muted); }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+a { color: var(--accent); }
+.sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+.layout { display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 960px) { .layout { grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); } }
+.frame-col { display: grid; gap: 14px; min-width: 0; }
+@media (min-width: 960px) { .frame-col { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); } }
+
+/* ---------- controls (the remote) ---------- */
+.remote {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 22px 22px 14px 14px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.ctl {
+  border: 0;
+  margin: 0;
+  padding: 10px 10px 12px;
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  transition: box-shadow 120ms ease, background 120ms ease;
+}
+.ctl legend, .ctl .label { padding: 0; font-size: 0.95rem; font-weight: 600; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.ctl legend small, .ctl .label small { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0; text-transform: none; color: var(--muted); font-weight: 400; }
+.ctl.hl { background: var(--hi-soft); box-shadow: inset 0 0 0 2px var(--hi); }
+.hint { margin: 0; font-size: 0.82rem; color: var(--muted); }
+.hint.warn { color: var(--warn); }
+
+.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label {
+  font: 600 0.82rem/1 var(--font-display);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+  cursor: pointer;
+  user-select: none;
+  min-width: 2.4rem;
+  text-align: center;
+}
+.seg input:checked + label { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.seg input:focus-visible + label { outline: 2px solid var(--hi); outline-offset: 2px; }
+.seg input:disabled + label { opacity: 0.4; cursor: not-allowed; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.split { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+
+.toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); cursor: pointer; transition: box-shadow 120ms ease, background 120ms ease; }
+.toggle.hl { background: var(--hi-soft); box-shadow: inset 0 0 0 2px var(--hi); }
+.toggle span { font: 600 0.9rem/1.1 var(--font-display); letter-spacing: 0.05em; text-transform: uppercase; }
+.toggle small { display: block; font: 400 0.72rem/1.2 var(--font-mono); letter-spacing: 0; text-transform: none; color: var(--muted); }
+.toggle input { appearance: none; width: 40px; height: 22px; border-radius: 11px; background: var(--line); position: relative; cursor: pointer; flex: none; margin: 0; transition: background 120ms ease; }
+.toggle input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); transition: transform 120ms ease; }
+.toggle input:checked { background: var(--accent); }
+.toggle input:checked::after { transform: translateX(18px); }
+.toggle input:focus-visible { outline: 2px solid var(--hi); outline-offset: 2px; }
+.toggle input:disabled { opacity: 0.4; cursor: not-allowed; }
+.feat-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+
+.temp { display: flex; align-items: center; gap: 12px; }
+.temp output { font: 700 1.6rem/1 var(--font-mono); min-width: 5.2ch; }
+input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
+input[type="time"], input[type="text"] {
+  font: 400 0.9rem var(--font-mono);
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+  min-width: 0;
+}
+input[type="time"]:focus-visible, input[type="text"]:focus-visible, button:focus-visible { outline: 2px solid var(--hi); outline-offset: 2px; }
+.timer-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 8px; border-radius: 8px; transition: box-shadow 120ms ease, background 120ms ease; }
+.timer-row.hl { background: var(--hi-soft); box-shadow: inset 0 0 0 2px var(--hi); }
+.timer-row label { display: flex; align-items: center; gap: 6px; font: 600 0.85rem var(--font-display); letter-spacing: 0.05em; text-transform: uppercase; min-width: 7.5rem; }
+.timer-row input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
+
+button.btn {
+  font: 600 0.8rem/1 var(--font-display);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+  cursor: pointer;
+}
+button.btn:hover { border-color: var(--accent); }
+button.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.load { display: grid; gap: 8px; }
+.load .row input { flex: 1 1 14rem; }
+.msg { margin: 0; font-size: 0.82rem; min-height: 1.2em; }
+.msg.err { color: var(--bad); }
+.msg.ok { color: var(--ok); }
+.msg.warn { color: var(--warn); }
+
+/* ---------- LCD hex strip ---------- */
+.lcd {
+  background: var(--lcd);
+  color: var(--lcd-ink);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: grid;
+  gap: 8px;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+.lcd-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.lcd-top .label { font-size: 0.85rem; color: var(--lcd-dim); }
+.status { font: 600 0.8rem var(--font-mono); color: var(--lcd-ink); }
+.hex { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px 6px; }
+@media (min-width: 640px) { .hex { grid-template-columns: repeat(18, minmax(0, 1fr)); } }
+.hex span {
+  font: 700 1.05rem/1.2 var(--font-mono);
+  text-align: center;
+  padding: 3px 0 1px;
+  border-radius: 4px;
+  cursor: default;
+}
+.hex span i { display: block; font: 400 0.58rem/1 var(--font-mono); font-style: normal; color: var(--lcd-dim); }
+.hex span.hlb, .hex span.hl { background: var(--hi-soft); box-shadow: inset 0 0 0 2px var(--hi); }
+.hex span.flash { animation: flash 900ms ease-out; }
+.lcd-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.lcd-actions .btn { background: transparent; border-color: var(--lcd-dim); color: var(--lcd-ink); }
+#copyMsg { font: 400 0.75rem var(--font-mono); color: var(--lcd-dim); }
+
+/* ---------- inspector + notes ---------- */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+.inspector { display: grid; gap: 6px; min-height: 9.5rem; }
+.insp-head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: baseline; }
+.insp-head h3 { margin: 0; font-size: 1.35rem; font-weight: 700; }
+.insp-where { font: 400 0.8rem var(--font-mono); color: var(--muted); }
+.insp p { margin: 0; }
+.insp .val { font: 400 0.85rem/1.5 var(--font-mono); overflow-wrap: anywhere; }
+.insp .vals { font-size: 0.85rem; color: var(--muted); }
+.badge { font: 700 0.68rem/1 var(--font-display); letter-spacing: 0.08em; padding: 4px 6px; border-radius: 4px; border: 1px solid currentColor; }
+.badge.CONFIRMED { color: var(--ok); }
+.badge.STRONG { color: var(--accent); }
+.badge.WEAK { color: var(--warn); }
+.notes { display: grid; gap: 4px; }
+.notes p { margin: 0; font-size: 0.86rem; }
+.notes p b { font-family: var(--font-mono); font-weight: 600; }
+
+/* ---------- bit grid ---------- */
+.grid-wrap { overflow-x: auto; }
+table.bits { border-collapse: separate; border-spacing: 3px; width: 100%; min-width: 560px; }
+.bits th { font: 600 0.72rem var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 2px 4px; text-align: center; }
+.bits th.desc-h { text-align: left; }
+.bits tbody th { font: 600 0.8rem var(--font-mono); color: var(--muted); width: 2.4rem; border-radius: 4px; cursor: default; }
+.bits td.bit {
+  width: 2.1rem;
+  height: 1.85rem;
+  text-align: center;
+  font: 600 0.82rem var(--font-mono);
+  border-radius: 4px;
+  cursor: default;
+  transition: box-shadow 100ms ease;
+}
+.bits td.hexc { font: 700 0.85rem var(--font-mono); text-align: center; width: 2.6rem; color: var(--ink); }
+.bits td.desc { font-size: 0.82rem; padding-left: 6px; min-width: 12rem; }
+.g-core  { --g: var(--g-core);  --t: var(--t-core); }
+.g-air   { --g: var(--g-air);   --t: var(--t-air); }
+.g-feat  { --g: var(--g-feat);  --t: var(--t-feat); }
+.g-time  { --g: var(--g-time);  --t: var(--t-time); }
+.g-sum   { --g: var(--g-sum);   --t: var(--t-sum); }
+.g-const { --g: var(--g-const); --t: var(--t-const); }
+td.bit { background: var(--t); color: var(--muted); }
+td.bit.one { background: var(--g); color: var(--surface); }
+td.bit.zero-field { opacity: 0.55; }
+td.bit.hl, td.bit.hlb { box-shadow: 0 0 0 2px var(--hi); }
+td.bit.hl { outline: 2px solid var(--hi); outline-offset: -2px; }
+tr.hlb th, tr.hlb td.hexc { color: var(--ink); background: var(--hi-soft); }
+td.bit.flash { animation: flash 900ms ease-out; }
+@keyframes flash { 0% { box-shadow: 0 0 0 3px var(--hi); } 100% { box-shadow: 0 0 0 0 transparent; } }
+.chip {
+  display: inline-flex;
+  gap: 4px;
+  align-items: baseline;
+  margin: 1px 4px 1px 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border-left: 3px solid var(--g);
+  background: var(--t);
+  font: 600 0.72rem/1.5 var(--font-display);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: default;
+}
+.chip b { font: 600 0.74rem var(--font-mono); letter-spacing: 0; text-transform: none; }
+.chip.hl { background: var(--hi-soft); box-shadow: inset 0 0 0 1px var(--hi); }
+.bits caption { caption-side: bottom; text-align: left; font-size: 0.78rem; color: var(--muted); padding-top: 6px; }
+
+/* ---------- pulse train ---------- */
+.wave svg { display: block; width: 100%; height: 56px; }
+.wave .trace { fill: none; stroke: var(--ink); stroke-width: 1.2; }
+.wave .band { fill: transparent; }
+.wave .band.odd { fill: var(--t-const); }
+.wave .band.hlb { fill: var(--hi-soft); }
+.wave .hdr { fill: var(--t-core); }
+.wave-labels { display: flex; font: 400 0.6rem/1.4 var(--font-mono); color: var(--muted); }
+.wave-labels span { overflow: hidden; text-align: center; white-space: nowrap; cursor: default; min-width: 0; }
+.wave-labels span.hlb { color: var(--ink); background: var(--hi-soft); }
+.legend-row { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.8rem; color: var(--muted); }
+.legend-row span { display: inline-flex; align-items: center; gap: 6px; }
+.legend-row i { width: 12px; height: 12px; border-radius: 3px; background: var(--g); display: inline-block; }
+footer { font-size: 0.82rem; color: var(--muted); max-width: 90ch; }
+footer p { margin: 0 0 6px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
+</style>
+
+<div class="page">
+  <header>
+    <h1>MSZ-FD25VA Frame Builder</h1>
+    <p class="lede">Set the controls of the MSZ-FD25VA remote. The page builds the 18-byte infrared frame that the remote sends, and shows the bits of each field. Hover or focus a control, a bit, a byte or a field label to highlight that field everywhere.</p>
+  </header>
+
+  <div class="layout">
+    <!-- ================= the remote ================= -->
+    <section class="remote" aria-label="Remote controls">
+      <div class="load card">
+        <h2>Load a frame</h2>
+        <div class="row">
+          <button class="btn" type="button" data-preset="A">Capture A</button>
+          <button class="btn" type="button" data-preset="B">Capture B</button>
+          <button class="btn" type="button" data-preset="C">Capture C</button>
+        </div>
+        <div class="row">
+          <label class="sr" for="paste">Paste 18 hex bytes</label>
+          <input id="paste" type="text" spellcheck="false" autocomplete="off" placeholder="23 CB 26 01 00 20 58 08 06 40 …">
+          <button class="btn" type="button" id="decodeBtn">Decode</button>
+        </div>
+        <p class="msg" id="loadMsg" role="status"></p>
+      </div>
+
+      <div class="split">
+        <fieldset class="ctl" data-ctl="power" data-fields="power">
+          <legend>Power <small>byte 5</small></legend>
+          <div class="seg">
+            <input type="radio" name="power" id="power-on" value="on"><label for="power-on">On</label>
+            <input type="radio" name="power" id="power-off" value="off"><label for="power-off">Off</label>
+          </div>
+        </fieldset>
+        <fieldset class="ctl" data-ctl="mode" data-fields="mode mode2">
+          <legend>Mode <small>bytes 6, 8</small></legend>
+          <div class="seg">
+            <input type="radio" name="mode" id="mode-AUTO" value="AUTO"><label for="mode-AUTO">Auto</label>
+            <input type="radio" name="mode" id="mode-COOL" value="COOL"><label for="mode-COOL">Cool</label>
+            <input type="radio" name="mode" id="mode-DRY" value="DRY"><label for="mode-DRY">Dry</label>
+            <input type="radio" name="mode" id="mode-HEAT" value="HEAT"><label for="mode-HEAT">Heat</label>
+          </div>
+        </fieldset>
+      </div>
+
+      <div class="ctl" data-ctl="temp" data-fields="temp">
+        <label class="label" for="temp">Temperature <small>byte 7</small></label>
+        <div class="temp">
+          <input type="range" id="temp" min="16" max="31" step="1">
+          <output id="tempOut" for="temp">24 °C</output>
+        </div>
+        <p class="hint" id="tempHint" hidden>DRY: the unit sets its own target and ignores this value (R12).</p>
+      </div>
+
+      <fieldset class="ctl" data-ctl="fan" data-fields="fan">
+        <legend>Fan <small>byte 9 bits 2–0</small></legend>
+        <div class="seg">
+          <input type="radio" name="fan" id="fan-AUTO" value="AUTO"><label for="fan-AUTO">Auto</label>
+          <input type="radio" name="fan" id="fan-LOW" value="LOW"><label for="fan-LOW">Low</label>
+          <input type="radio" name="fan" id="fan-MED" value="MED"><label for="fan-MED">Med</label>
+          <input type="radio" name="fan" id="fan-HIGH" value="HIGH"><label for="fan-HIGH">High</label>
+          <input type="radio" name="fan" id="fan-SUPER_HIGH" value="SUPER_HIGH"><label for="fan-SUPER_HIGH">Super high</label>
+        </div>
+      </fieldset>
+
+      <fieldset class="ctl" data-ctl="vane" data-fields="vane">
+        <legend>Vane (up/down) <small>byte 9 bits 5–3</small></legend>
+        <div class="seg">
+          <input type="radio" name="vane" id="vane-AUTO" value="AUTO"><label for="vane-AUTO">Auto</label>
+          <input type="radio" name="vane" id="vane-POS1" value="POS1"><label for="vane-POS1">1</label>
+          <input type="radio" name="vane" id="vane-POS2" value="POS2"><label for="vane-POS2">2</label>
+          <input type="radio" name="vane" id="vane-POS3" value="POS3"><label for="vane-POS3">3</label>
+          <input type="radio" name="vane" id="vane-POS4" value="POS4"><label for="vane-POS4">4</label>
+          <input type="radio" name="vane" id="vane-POS5" value="POS5"><label for="vane-POS5">5</label>
+          <input type="radio" name="vane" id="vane-SWING" value="SWING"><label for="vane-SWING">Swing</label>
+        </div>
+        <p class="hint">1 is the highest position, 5 the lowest.</p>
+      </fieldset>
+
+      <fieldset class="ctl" data-ctl="area" data-fields="area wide">
+        <legend>i-see area <small>byte 13 bits 7–6</small></legend>
+        <div class="seg">
+          <input type="radio" name="area" id="area-OFF" value="OFF"><label for="area-OFF">Off</label>
+          <input type="radio" name="area" id="area-AUTO" value="AUTO"><label for="area-AUTO">Auto</label>
+          <input type="radio" name="area" id="area-LEFT" value="LEFT"><label for="area-LEFT">Left</label>
+          <input type="radio" name="area" id="area-RIGHT" value="RIGHT"><label for="area-RIGHT">Right</label>
+        </div>
+        <p class="hint" id="areaHint">AREA and WIDE VANE exclude each other (R3).</p>
+      </fieldset>
+
+      <fieldset class="ctl" data-ctl="wide" data-fields="wide area">
+        <legend>Wide vane (left/right) <small>byte 8 bits 7–4</small></legend>
+        <div class="seg">
+          <input type="radio" name="wide" id="wide-FAR_LEFT" value="FAR_LEFT"><label for="wide-FAR_LEFT">Far left</label>
+          <input type="radio" name="wide" id="wide-LEFT" value="LEFT"><label for="wide-LEFT">Left</label>
+          <input type="radio" name="wide" id="wide-CENTER" value="CENTER"><label for="wide-CENTER">Center</label>
+          <input type="radio" name="wide" id="wide-RIGHT" value="RIGHT"><label for="wide-RIGHT">Right</label>
+          <input type="radio" name="wide" id="wide-FAR_RIGHT" value="FAR_RIGHT"><label for="wide-FAR_RIGHT">Far right</label>
+          <input type="radio" name="wide" id="wide-SWING" value="SWING"><label for="wide-SWING">Swing</label>
+        </div>
+        <p class="hint" id="wideHint"></p>
+      </fieldset>
+
+      <div class="ctl" data-ctl="features">
+        <span class="label">Features</span>
+        <div class="feat-grid">
+          <label class="toggle" data-ctl="isee" data-fields="isee"><span>i-see<small>byte 6 bit 6</small></span><input type="checkbox" role="switch" id="isee"></label>
+          <label class="toggle" data-ctl="clean" data-fields="clean"><span>Clean<small>byte 14 bit 2</small></span><input type="checkbox" role="switch" id="clean"></label>
+          <label class="toggle" data-ctl="plasma" data-fields="plasma"><span>Plasma<small>byte 15 bit 6</small></span><input type="checkbox" role="switch" id="plasma"></label>
+          <label class="toggle" data-ctl="econo" data-fields="econo"><span>Econo cool<small>byte 14 bit 5</small></span><input type="checkbox" role="switch" id="econo"></label>
+        </div>
+        <p class="hint" id="econoHint">Econo cool works only in COOL (R6).</p>
+      </div>
+
+      <fieldset class="ctl" data-ctl="install" data-fields="install">
+        <legend>Install position <small>byte 14 bits 4–3</small></legend>
+        <div class="seg">
+          <input type="radio" name="install" id="install-LEFT" value="LEFT"><label for="install-LEFT">Left</label>
+          <input type="radio" name="install" id="install-CENTER" value="CENTER"><label for="install-CENTER">Center</label>
+          <input type="radio" name="install" id="install-RIGHT" value="RIGHT"><label for="install-RIGHT">Right</label>
+        </div>
+        <p class="hint">The slide switch inside the remote's battery compartment.</p>
+      </fieldset>
+
+      <div class="ctl" data-ctl="time">
+        <span class="label">Clock and timers <small>bytes 10–13</small></span>
+        <div class="timer-row" data-ctl="clock" data-fields="clock">
+          <label for="clock">Clock</label>
+          <input type="time" id="clock" step="60">
+          <span class="hint mono" id="clockUnits"></span>
+        </div>
+        <div class="timer-row" data-ctl="offt" data-fields="offt timer">
+          <label for="offOn"><input type="checkbox" id="offOn"> Off timer</label>
+          <label class="sr" for="offTime">Off timer time</label>
+          <input type="time" id="offTime" step="600">
+        </div>
+        <div class="timer-row" data-ctl="ont" data-fields="ont timer">
+          <label for="onOn"><input type="checkbox" id="onOn"> On timer</label>
+          <label class="sr" for="onTime">On timer time</label>
+          <input type="time" id="onTime" step="600">
+        </div>
+        <p class="hint">Timer fields have no real capture yet (evidence WEAK).</p>
+      </div>
+    </section>
+
+    <!-- ================= the frame ================= -->
+    <section class="frame-col" aria-label="IR frame">
+      <div class="lcd">
+        <div class="lcd-top">
+          <span class="label">Frame (hex, byte 0 first)</span>
+          <span class="status" id="status"></span>
+        </div>
+        <div class="hex" id="hex" aria-label="Frame bytes"></div>
+        <div class="lcd-actions">
+          <button class="btn" type="button" id="copyBtn">Copy hex</button>
+          <code class="mono" id="hexText" hidden></code>
+          <span id="copyMsg" role="status"></span>
+        </div>
+      </div>
+
+      <div class="card inspector insp" id="insp" aria-live="polite"></div>
+      <div class="notes" id="notes" role="status"></div>
+
+      <div class="card grid-wrap">
+        <table class="bits" id="bits">
+          <caption>Each row is one byte, bit 7 on the left. Filled cells are 1. The remote sends bit 0 of each byte first.</caption>
+          <thead>
+            <tr><th scope="col">Byte</th><th scope="col">7</th><th scope="col">6</th><th scope="col">5</th><th scope="col">4</th><th scope="col">3</th><th scope="col">2</th><th scope="col">1</th><th scope="col">0</th><th scope="col">Hex</th><th scope="col" class="desc-h">Fields</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="card wave">
+        <h2>Pulse train, first copy</h2>
+        <svg id="wave" role="img" aria-label="Infrared pulse train of the first frame copy" preserveAspectRatio="none"></svg>
+        <div class="wave-labels" id="waveLabels"></div>
+        <p class="hint" id="waveNote"></p>
+      </div>
+
+      <div class="legend-row" aria-label="Colour legend">
+        <span class="g-core"><i></i>Power, mode, temperature</span>
+        <span class="g-air"><i></i>Airflow</span>
+        <span class="g-feat"><i></i>Features, install position</span>
+        <span class="g-time"><i></i>Clock, timers</span>
+        <span class="g-sum"><i></i>Checksum</span>
+        <span class="g-const"><i></i>Constant</span>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    <p>Source: IR_PROTOCOL.md in the root of the <a href="https://github.com/vhtkrk/mitsubishi_remote" target="_blank" rel="noopener">mitsubishi_remote</a> repository. The § numbers and the rules R1–R13 refer to that document.</p>
+    <p>Captures A and B come from an original MSZ-FD25 remote (<a href="https://github.com/crankyoldgit/IRremoteESP8266/issues/1825" target="_blank" rel="noopener">IRremoteESP8266 issue #1825</a>). Capture C comes from the repository tests; its bytes 16 and 17 are completed here. Evidence levels: CONFIRMED = seen in a real frame; STRONG = two or more independent sources; WEAK = one source or one lineage only.</p>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- protocol (IR_PROTOCOL.md §2, §3) ----
+  const HEADER = [0x23, 0xCB, 0x26, 0x01, 0x00];
+  const MODES = { HEAT: 1, DRY: 2, COOL: 3, AUTO: 4 };
+  const MODE2 = { HEAT: 0, DRY: 2, COOL: 6, AUTO: 0 };
+  const FANS = { AUTO: 0, LOW: 1, MED: 2, HIGH: 3, SUPER_HIGH: 4 };
+  const VANES = { AUTO: 0, POS1: 1, POS2: 2, POS3: 3, POS4: 4, POS5: 5, SWING: 7 };
+  const WIDES = { NONE: 0, FAR_LEFT: 1, LEFT: 2, CENTER: 3, RIGHT: 4, FAR_RIGHT: 5, SWING: 12 };
+  const AREAS = { OFF: 0, LEFT: 1, AUTO: 2, RIGHT: 3 };
+  const INSTALLS = { LEFT: 1, CENTER: 2, RIGHT: 3 };
+  const TIMERS = { 0: "none", 5: "ON", 3: "OFF", 7: "ON+OFF" };
+  const T = { HDR_MARK: 3400, HDR_SPACE: 1750, BIT_MARK: 450, ONE: 1300, ZERO: 420, STOP: 440, GAP: 17100 };
+
+  const invert = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [v, k]));
+  const hex2 = (n) => n.toString(16).toUpperCase().padStart(2, "0");
+  const bin = (n, w) => n.toString(2).padStart(w, "0");
+  const toUnits = (t) => { const [h, m] = t.split(":").map(Number); return h * 6 + Math.floor(m / 10); };
+  const fromUnits = (u) => String(Math.floor(u / 6)).padStart(2, "0") + ":" + String((u % 6) * 10).padStart(2, "0");
+
+  function encode(s) {
+    const timer = (s.onTimer != null ? 0b101 : 0) | (s.offTimer != null ? 0b011 : 0);
+    const f = [
+      ...HEADER,
+      s.power ? 0x20 : 0x00,
+      (s.isee ? 0x40 : 0) | (MODES[s.mode] << 3),
+      s.temp - 16,
+      (WIDES[s.wide] << 4) | MODE2[s.mode],
+      0x40 | (VANES[s.vane] << 3) | FANS[s.fan],
+      toUnits(s.clock),
+      s.offTimer != null ? toUnits(s.offTimer) : 0,
+      s.onTimer != null ? toUnits(s.onTimer) : 0,
+      (AREAS[s.area] << 6) | timer,
+      (s.econo ? 0x20 : 0) | (INSTALLS[s.install] << 3) | (s.clean ? 0x04 : 0),
+      s.plasma ? 0x40 : 0x00,
+      0x00,
+    ];
+    f.push(f.reduce((a, b) => a + b, 0) & 0xFF);
+    return f;
+  }
+
+  // Decode a frame into a state. Throws for values the MSZ-FD remote never sends.
+  function decode(b) {
+    const warn = [];
+    const need = (cond, msg) => { if (!cond) throw new Error(msg); };
+    need(b.length === 18, "Need 18 bytes, got " + b.length + ".");
+    need(HEADER.every((v, i) => b[i] === v), "Bytes 0–4 must be 23 CB 26 01 00.");
+    need((b[5] & ~0x20) === 0, "Byte 5 has bits other than POWER set.");
+    const mode = invert(MODES)[(b[6] >> 3) & 7];
+    need(mode, "Byte 6 holds an unknown MODE value " + bin((b[6] >> 3) & 7, 3) + ".");
+    need((b[6] & 0x87) === 0, "Byte 6 has unused bits set.");
+    need((b[7] & 0xF0) === 0, "Byte 7 has bits 7–4 set (half degrees are not used by this remote).");
+    const wide = invert(WIDES)[b[8] >> 4];
+    need(wide, "Byte 8 holds WIDE_VANE 0x" + (b[8] >> 4).toString(16).toUpperCase() + ", which this remote never sends.");
+    if ((b[8] & 7) !== MODE2[mode]) warn.push("MODE2 does not match MODE (R2).");
+    need((b[8] & 0x08) === 0, "Byte 8 bit 3 is set.");
+    need((b[9] & 0xC0) === 0x40, "Byte 9 bit 7 must be 0 and bit 6 must be 1.");
+    const vane = invert(VANES)[(b[9] >> 3) & 7];
+    const fan = invert(FANS)[b[9] & 7];
+    need(vane && fan, "Byte 9 holds a VANE or FAN value this remote never sends.");
+    need(b[10] < 144, "CLOCK is larger than 0x8F (23:50).");
+    need((b[13] & 0x38) === 0, "Byte 13 bits 5–3 are set.");
+    need(TIMERS[b[13] & 7], "Byte 13 holds an unknown TIMER value.");
+    need((b[14] & 0xC3) === 0, "Byte 14 has unused bits set.");
+    const install = invert(INSTALLS)[(b[14] >> 3) & 3];
+    need(install, "INSTALL_POS is 00, which this remote never sends.");
+    need((b[15] & ~0x40) === 0, "Byte 15 has bits other than PLASMA set.");
+    need(b[16] === 0, "Byte 16 must be 00.");
+    const sum = b.slice(0, 17).reduce((a, x) => a + x, 0) & 0xFF;
+    if (sum !== b[17]) warn.push("Checksum is " + hex2(b[17]) + ", expected " + hex2(sum) + ".");
+    const area = invert(AREAS)[b[13] >> 6];
+    if ((area === "OFF") === (wide === "NONE")) warn.push("AREA and WIDE_VANE break rule R3.");
+    if (area !== "OFF" && !(b[6] & 0x40)) warn.push("AREA is set without i-see (R4).");
+    if ((b[14] & 0x20) && mode !== "COOL") warn.push("ECONO COOL is set outside COOL (R6).");
+    const t = b[13] & 7;
+    return {
+      warn,
+      state: {
+        power: !!(b[5] & 0x20), mode, isee: !!(b[6] & 0x40), temp: (b[7] & 0x0F) + 16,
+        wide: (area !== "OFF") ? "NONE" : (wide === "NONE" ? "CENTER" : wide),
+        lastWide: wide === "NONE" ? "CENTER" : wide,
+        vane, fan, clock: fromUnits(b[10]),
+        offTimer: (t & 2) ? fromUnits(b[11]) : null, onTimer: (t & 4) ? fromUnits(b[12]) : null,
+        area, install, clean: !!(b[14] & 0x04), econo: !!(b[14] & 0x20), plasma: !!(b[15] & 0x40),
+      },
+    };
+  }
+
+  const parseHex = (text) => (text.replace(/0x/gi, "").match(/[0-9a-f]{2}/gi) || []).map((h) => parseInt(h, 16));
+
+  const CAPTURES = {
+    A: { hex: "23 CB 26 01 00 20 58 08 06 40 62 00 00 80 10 00 00 CD", label: "Capture A · original remote · COOL 24 °C, AREA AUTO" },
+    B: { hex: "23 CB 26 01 00 20 58 08 06 40 37 00 00 40 18 00 00 6A", label: "Capture B · original remote · AREA LEFT, install RIGHT" },
+    C: { hex: "23 CB 26 01 00 00 48 06 00 69 53 00 00 80 14 40 00 F3", label: "Capture C · power-off frame · HEAT 22 °C (bytes 16–17 completed)" },
+  };
+
+  // ---- fields (IR_PROTOCOL.md §2.2) ----
+  const FIELDS = {
+    header: { name: "HEADER", group: "const", sec: "§3.1", ev: "CONFIRMED", evText: "The same in every capture.",
+      desc: "Fixed bytes 23 CB 26 01 00. Unknown: where a J1/J2-modified remote puts its number (U1)." },
+    power: { name: "POWER", byte: 5, mask: 0x20, group: "core", sec: "§3.2", ev: "CONFIRMED", evText: "On in captures A and B, off in capture C.",
+      values: "1 = ON · 0 = OFF", desc: "Unit on or off. A power-off frame still carries the full state (R1).", fmt: (v) => (v ? "ON" : "OFF") },
+    isee: { name: "ISEE", byte: 6, mask: 0x40, group: "feat", sec: "§3.3", ev: "CONFIRMED", evText: "Set in every capture. The off value comes from three sources.",
+      values: "1 = on · 0 = off", desc: "i-see sensor control. The unit uses it only in COOL and HEAT. AREA needs it (R4).", fmt: (v) => (v ? "on" : "off") },
+    mode: { name: "MODE", byte: 6, mask: 0x38, group: "core", sec: "§3.3", ev: "CONFIRMED", evText: "COOL and HEAT captured. DRY and AUTO: STRONG.",
+      values: "HEAT 001 · DRY 010 · COOL 011 · AUTO 100", desc: "Operation mode. MODE2 in byte 8 follows it (R2).", fmt: (v) => invert(MODES)[v] },
+    temp: { name: "TEMP", byte: 7, mask: 0x0F, group: "core", sec: "§3.4", ev: "CONFIRMED", evText: "24 °C and 22 °C captured.",
+      values: "0–15 = 16–31 °C", desc: "Set temperature minus 16. The unit ignores it in DRY (R12).", fmt: (v) => (v + 16) + " °C" },
+    wide: { name: "WIDE_VANE", byte: 8, mask: 0xF0, group: "air", sec: "§3.5", ev: "STRONG", evText: "NONE captured. Positions and SWING (0xC) come from two independent MSZ-FD sources.",
+      values: "NONE 0 · FAR_LEFT 1 · LEFT 2 · CENTER 3 · RIGHT 4 · FAR_RIGHT 5 · SWING C", desc: "Left/right louvers. NONE means that AREA is active (R3).", fmt: (v) => invert(WIDES)[v] },
+    mode2: { name: "MODE2", byte: 8, mask: 0x07, group: "core", sec: "§3.5", ev: "CONFIRMED", evText: "COOL and HEAT captured. DRY and AUTO: WEAK.",
+      values: "HEAT 000 · DRY 010 · COOL 110 · AUTO 000", desc: "Mode-dependent bits with an unknown meaning. Always derived from MODE (R2).", fmt: () => "from MODE" },
+    one9: { name: "Constant 1", byte: 9, mask: 0x40, group: "const", sec: "§3.6", ev: "CONFIRMED", evText: "Set in every capture.",
+      values: "always 1", desc: "Byte 9 bit 6 is 1 in every MSZ-FD frame.", fmt: () => "1" },
+    vane: { name: "VANE", byte: 9, mask: 0x38, group: "air", sec: "§3.6", ev: "STRONG", evText: "AUTO and POS5 captured. The other values: STRONG.",
+      values: "AUTO 0 · POS1–POS5 1–5 · SWING 7", desc: "Up/down louver. POS1 is the highest position.", fmt: (v) => invert(VANES)[v] },
+    fan: { name: "FAN", byte: 9, mask: 0x07, group: "air", sec: "§3.6", ev: "STRONG", evText: "AUTO and LOW captured. The other values: STRONG.",
+      values: "AUTO 0 · LOW 1 · MED 2 · HIGH 3 · SUPER_HIGH 4", desc: "Fan speed. AUTO is 000, and byte 9 bit 7 stays 0.", fmt: (v) => invert(FANS)[v] },
+    clock: { name: "CLOCK", byte: 10, mask: 0xFF, group: "time", sec: "§3.7", ev: "STRONG", evText: "Examples in the AnalysIR table and ToniA's FD template agree.",
+      values: "hour × 6 + minute ÷ 10 · 0x00–0x8F", desc: "Current time in 10-minute units. The unit needs it for the timers.", fmt: (v) => fromUnits(v) },
+    offt: { name: "OFF_TIMER", byte: 11, mask: 0xFF, group: "time", sec: "§3.8", ev: "WEAK", evText: "No timer capture exists.",
+      values: "10-minute units · 0 = not set", desc: "Time when the unit turns off (STOP button).", fmt: (v, b) => ((b[13] & 2) ? fromUnits(v) : "not set") },
+    ont: { name: "ON_TIMER", byte: 12, mask: 0xFF, group: "time", sec: "§3.8", ev: "WEAK", evText: "No timer capture exists.",
+      values: "10-minute units · 0 = not set", desc: "Time when the unit turns on (START button). Note the order: byte 11 is OFF, byte 12 is ON.", fmt: (v, b) => ((b[13] & 4) ? fromUnits(v) : "not set") },
+    area: { name: "AREA", byte: 13, mask: 0xC0, group: "air", sec: "§3.9", ev: "CONFIRMED", evText: "AUTO (captures A, C) and LEFT (B) captured. RIGHT and OFF: STRONG.",
+      values: "OFF 00 · LEFT 01 · AUTO 10 · RIGHT 11", desc: "i-see area control. It needs i-see (R4) and excludes WIDE_VANE (R3).", fmt: (v) => invert(AREAS)[v] },
+    timer: { name: "TIMER", byte: 13, mask: 0x07, group: "time", sec: "§3.9", ev: "WEAK", evText: "No timer capture exists.",
+      values: "000 none · 101 ON · 011 OFF · 111 both", desc: "Bit 2 = ON timer, bit 1 = OFF timer, bit 0 = any timer (R7).", fmt: (v) => TIMERS[v] },
+    econo: { name: "ECONO_COOL", byte: 14, mask: 0x20, group: "feat", sec: "§3.10", ev: "STRONG", evText: "No MSZ-FD capture. One MSZ-FD source and two other-model sources agree.",
+      values: "1 = on", desc: "Econo cool. COOL only. A VANE change or a mode change cancels it (R6).", fmt: (v) => (v ? "on" : "off") },
+    install: { name: "INSTALL_POS", byte: 14, mask: 0x18, group: "feat", sec: "§3.10", ev: "CONFIRMED", evText: "CENTER (A, C) and RIGHT (B) captured. LEFT: STRONG.",
+      values: "LEFT 01 · CENTER 10 · RIGHT 11", desc: "Slide switch in the remote: where the unit hangs on the wall. Constant for one installation (R10).", fmt: (v) => invert(INSTALLS)[v] },
+    clean: { name: "CLEAN", byte: 14, mask: 0x04, group: "feat", sec: "§3.10", ev: "STRONG", evText: "Set in capture C. Bit position from three sources.",
+      values: "1 = on", desc: "Clean cycle after COOL or DRY. The unit reads it when it stops, so the OFF frame must carry it (R8).", fmt: (v) => (v ? "on" : "off") },
+    plasma: { name: "PLASMA", byte: 15, mask: 0x40, group: "feat", sec: "§3.11", ev: "STRONG", evText: "Set in capture C. Reported to work on the unit.",
+      values: "1 = on", desc: "Plasma air cleaning. Bit 6, not bit 2 as the AnalysIR PDF says.", fmt: (v) => (v ? "on" : "off") },
+    b16: { name: "Constant 00", byte: 16, mask: 0xFF, group: "const", sec: "§3.12", ev: "CONFIRMED", evText: "00 in captures A and B.",
+      values: "always 00", desc: "Byte 16 is always 0x00. Other models use it.", fmt: () => "00" },
+    sum: { name: "CHECKSUM", byte: 17, mask: 0xFF, group: "sum", sec: "§3.13", ev: "CONFIRMED", evText: "Valid in captures A and B.",
+      values: "(byte 0 + … + byte 16) mod 256", desc: "Sum of bytes 0–16, modulo 256.", fmt: (v) => "0x" + hex2(v) },
+    zero: { name: "Unused", group: "const", sec: "§7.4", ev: "CONFIRMED", evText: "0 in every capture.",
+      desc: "The MSZ-FD remote always sends 0 here. Other Mitsubishi remotes use some of these bits." },
+  };
+  const BYTE_FIELDS = Array.from({ length: 18 }, (_, i) =>
+    i < 5 ? ["header"] : Object.keys(FIELDS).filter((k) => FIELDS[k].byte === i).sort((a, b) => FIELDS[b].mask - FIELDS[a].mask));
+  function fieldAt(byte, bit) {
+    if (byte < 5) return "header";
+    return BYTE_FIELDS[byte].find((k) => FIELDS[k].mask & (1 << bit)) || "zero";
+  }
+  const shiftOf = (mask) => Math.log2(mask & -mask);
+  const widthOf = (mask) => mask.toString(2).replace(/0/g, "").length;
+  const raw = (k, b) => (b[FIELDS[k].byte] & FIELDS[k].mask) >> shiftOf(FIELDS[k].mask);
+  const bitRange = (mask) => { const lo = shiftOf(mask), hi = lo + widthOf(mask) - 1; return hi === lo ? "bit " + lo : "bits " + hi + "–" + lo; };
+
+  // ---- state and rules (IR_PROTOCOL.md §4) ----
+  let state = decode(parseHex(CAPTURES.A.hex)).state;
+  let status = CAPTURES.A.label;
+  let bytes = encode(state);
+  let notes = [];
+  const note = (rule, text) => notes.push([rule, text]);
+  const wideLabel = (w) => w.replace("_", " ").toLowerCase();
+
+  const set = {
+    power: (v) => { state.power = v === "on"; },
+    mode: (m) => {
+      if (m !== "COOL" && state.econo) { state.econo = false; note("R6", "Econo cool works only in COOL. It is now off."); }
+      state.mode = m;
+    },
+    temp: (t) => { state.temp = Number(t); },
+    fan: (f) => { state.fan = f; },
+    vane: (v) => {
+      if (state.econo && v !== state.vane) { state.econo = false; note("R6", "A VANE change cancels econo cool."); }
+      state.vane = v;
+    },
+    area: (a) => {
+      if (a === "OFF") {
+        state.area = "OFF"; state.wide = state.lastWide;
+        note("R5", "AREA is off. WIDE VANE is back to " + wideLabel(state.wide) + ".");
+      } else {
+        state.area = a; state.wide = "NONE";
+        note("R3", "AREA is active, so WIDE_VANE = NONE (0x0).");
+      }
+    },
+    wide: (w) => {
+      state.wide = w; state.lastWide = w;
+      if (state.area !== "OFF") { state.area = "OFF"; note("R3", "WIDE VANE is active, so AREA = OFF."); }
+    },
+    isee: (on) => {
+      state.isee = on;
+      if (!on && state.area !== "OFF") {
+        state.area = "OFF"; state.wide = state.lastWide;
+        note("R4", "AREA needs i-see. AREA is now off and WIDE VANE is " + wideLabel(state.wide) + ".");
+      }
+    },
+    clean: (on) => { state.clean = on; },
+    plasma: (on) => { state.plasma = on; },
+    econo: (on) => { if (!on || state.mode === "COOL") state.econo = on; },
+    install: (p) => { state.install = p; },
+    clock: (t) => { if (t) state.clock = t; },
+    offOn: (on) => { state.offTimer = on ? ($("offTime").value || "23:00") : null; },
+    offTime: (t) => { if (state.offTimer != null && t) state.offTimer = t; },
+    onOn: (on) => { state.onTimer = on ? ($("onTime").value || "06:30") : null; },
+    onTime: (t) => { if (state.onTimer != null && t) state.onTimer = t; },
+  };
+
+  // ---- DOM ----
+  const $ = (id) => document.getElementById(id);
+  const hexEl = $("hex"), tbody = document.querySelector("#bits tbody"), insp = $("insp"), notesEl = $("notes");
+  const cells = [], hexChips = [], rows = [], descCells = [];
+
+  for (let i = 0; i < 18; i++) {
+    const chip = document.createElement("span");
+    chip.dataset.byte = i;
+    chip.innerHTML = "<i>" + i + "</i><b></b>";
+    hexEl.appendChild(chip); hexChips.push(chip);
+
+    const tr = document.createElement("tr");
+    tr.dataset.byte = i;
+    const th = document.createElement("th");
+    th.scope = "row"; th.textContent = i; th.dataset.byte = i;
+    tr.appendChild(th);
+    cells[i] = [];
+    for (let bit = 7; bit >= 0; bit--) {
+      const k = fieldAt(i, bit);
+      const td = document.createElement("td");
+      td.className = "bit g-" + FIELDS[k].group + (k === "zero" ? " zero-field" : "");
+      td.dataset.field = k; td.dataset.byte = i; td.dataset.bit = bit;
+      tr.appendChild(td); cells[i][bit] = td;
+    }
+    const hx = document.createElement("td");
+    hx.className = "hexc"; hx.dataset.byte = i; tr.appendChild(hx);
+    const desc = document.createElement("td");
+    desc.className = "desc"; tr.appendChild(desc); descCells.push(desc);
+    tbody.appendChild(tr); rows.push(tr);
+  }
+
+  function renderDesc(i) {
+    const ks = i < 5 ? ["header"] : BYTE_FIELDS[i];
+    descCells[i].innerHTML = ks.map((k) => {
+      const f = FIELDS[k];
+      const v = k === "header" ? hex2(HEADER[i]) : f.fmt(raw(k, bytes), bytes);
+      return '<span class="chip g-' + f.group + '" data-field="' + k + '">' + f.name + " <b>" + v + "</b></span>";
+    }).join("");
+  }
+
+  // pulse train of the first copy
+  const svg = $("wave"), waveLabels = $("waveLabels"), NS = "http://www.w3.org/2000/svg";
+  function renderWave() {
+    let x = 0, d = "M0,40";
+    const mark = (w) => { d += " L" + x + ",8 L" + (x + w) + ",8 L" + (x + w) + ",40"; x += w; };
+    const space = (w) => { d += " L" + (x + w) + ",40"; x += w; };
+    const spans = [];
+    mark(T.HDR_MARK); space(T.HDR_SPACE);
+    spans.push([0, x, "HDR", null]);
+    for (let i = 0; i < 18; i++) {
+      const start = x;
+      for (let bit = 0; bit < 8; bit++) { mark(T.BIT_MARK); space(bytes[i] >> bit & 1 ? T.ONE : T.ZERO); }
+      spans.push([start, x, String(i), i]);
+    }
+    const stopStart = x;
+    mark(T.STOP);
+    spans.push([stopStart, x, "", null]);
+    svg.setAttribute("viewBox", "0 0 " + x + " 48");
+    svg.innerHTML = "";
+    spans.forEach(([a, b, , i], n) => {
+      const r = document.createElementNS(NS, "rect");
+      r.setAttribute("x", a); r.setAttribute("y", 0); r.setAttribute("width", b - a); r.setAttribute("height", 48);
+      r.setAttribute("class", i === null ? (n === 0 ? "hdr" : "band") : "band" + (i % 2 ? " odd" : ""));
+      if (i !== null) r.dataset.byte = i;
+      svg.appendChild(r);
+    });
+    const p = document.createElementNS(NS, "path");
+    p.setAttribute("d", d); p.setAttribute("class", "trace"); p.setAttribute("vector-effect", "non-scaling-stroke");
+    svg.appendChild(p);
+    waveLabels.innerHTML = spans.map(([a, b, label, i]) =>
+      '<span style="flex:' + (b - a) + '"' + (i !== null ? ' data-byte="' + i + '"' : "") + ">" + label + "</span>").join("");
+    $("waveNote").textContent = "This copy lasts " + (x / 1000).toFixed(1) + " ms. Each bit is a 450 µs mark and a 1300 µs (1) or 420 µs (0) space, bit 0 first. A 440 µs stop mark ends the copy; after a 17.1 ms gap the remote sends the same frame again.";
+  }
+
+  function syncControls() {
+    const check = (name, value) => { const el = document.querySelector('input[name="' + name + '"][value="' + value + '"]'); if (el) el.checked = true; };
+    check("power", state.power ? "on" : "off");
+    check("mode", state.mode); check("fan", state.fan); check("vane", state.vane);
+    check("area", state.area); check("install", state.install);
+    document.querySelectorAll('input[name="wide"]').forEach((el) => { el.checked = el.value === state.wide; });
+    document.querySelectorAll('input[name="area"]').forEach((el) => { el.disabled = el.value !== "OFF" && !state.isee; });
+    $("temp").value = state.temp; $("tempOut").textContent = state.temp + " °C";
+    $("tempHint").hidden = state.mode !== "DRY";
+    $("isee").checked = state.isee; $("clean").checked = state.clean; $("plasma").checked = state.plasma;
+    $("econo").checked = state.econo; $("econo").disabled = state.mode !== "COOL";
+    $("econoHint").classList.toggle("warn", state.mode !== "COOL");
+    $("areaHint").textContent = state.isee ? "AREA and WIDE VANE exclude each other (R3)." : "Turn on i-see to use AREA (R4).";
+    $("areaHint").classList.toggle("warn", !state.isee);
+    $("wideHint").textContent = state.wide === "NONE" ? "AREA is active, so WIDE_VANE = NONE. Pick a position to turn AREA off." : "";
+    $("clock").value = state.clock;
+    $("clockUnits").textContent = "→ " + fromUnits(toUnits(state.clock)) + " = 0x" + hex2(toUnits(state.clock));
+    $("offOn").checked = state.offTimer != null; $("offTime").disabled = state.offTimer == null;
+    if (state.offTimer != null) $("offTime").value = state.offTimer;
+    $("onOn").checked = state.onTimer != null; $("onTime").disabled = state.onTimer == null;
+    if (state.onTimer != null) $("onTime").value = state.onTimer;
+  }
+
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  function flash(el) {
+    if (reduceMotion) return;
+    el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+  }
+
+  function render(prev) {
+    bytes = encode(state);
+    for (let i = 0; i < 18; i++) {
+      hexChips[i].querySelector("b").textContent = hex2(bytes[i]);
+      rows[i].querySelector(".hexc").textContent = hex2(bytes[i]);
+      for (let bit = 0; bit < 8; bit++) {
+        const on = (bytes[i] >> bit) & 1;
+        const td = cells[i][bit];
+        td.textContent = on; td.classList.toggle("one", !!on);
+        if (prev && ((prev[i] >> bit) & 1) !== on) flash(td);
+      }
+      if (prev && prev[i] !== bytes[i]) flash(hexChips[i]);
+      renderDesc(i);
+    }
+    $("hexText").textContent = bytes.map(hex2).join(" ");
+    $("status").textContent = status;
+    syncControls();
+    renderWave();
+    notesEl.innerHTML = notes.map(([r, t]) => "<p><b>" + r + "</b> " + t + "</p>").join("");
+    if (current) show(current.kind, current.key);
+  }
+
+  // ---- inspector and highlight ----
+  let current = null;
+  function show(kind, key) {
+    current = { kind, key };
+    if (kind === "byte") {
+      const i = Number(key);
+      const wire = Array.from({ length: 8 }, (_, bit) => (bytes[i] >> bit) & 1).join(" ");
+      const names = (i < 5 ? ["header"] : BYTE_FIELDS[i]).map((k) => FIELDS[k].name).join(", ");
+      insp.innerHTML = '<div class="insp-head"><h3>Byte ' + i + "</h3>" +
+        '<span class="insp-where">0x' + hex2(bytes[i]) + " = 0b" + bin(bytes[i], 8).replace(/(\d{4})(\d{4})/, "$1_$2") + "</span></div>" +
+        "<p>Fields: " + names + ".</p>" +
+        '<p class="val">Wire order, bit 0 first: ' + wire + "</p>";
+      return;
+    }
+    const f = FIELDS[key];
+    if (!f) return;
+    let where, val = "";
+    if (key === "header") {
+      where = "bytes 0–4 · constant";
+      val = "Value " + HEADER.map(hex2).join(" ");
+    } else if (key === "zero") {
+      where = "unused bits · always 0";
+    } else {
+      where = "byte " + f.byte + " · " + bitRange(f.mask) + " · mask 0x" + hex2(f.mask);
+      const v = raw(key, bytes);
+      const w = widthOf(f.mask);
+      val = "Field value 0b" + bin(v, w) + " = " + f.fmt(v, bytes) +
+        " · byte contribution 0x" + hex2(bytes[f.byte] & f.mask) + " · byte " + f.byte + " = 0x" + hex2(bytes[f.byte]);
+    }
+    insp.innerHTML = '<div class="insp-head"><h3>' + f.name + '</h3><span class="insp-where">' + where + "</span>" +
+      '<span class="badge ' + f.ev + '">' + f.ev + '</span><span class="insp-where">' + f.sec + "</span></div>" +
+      "<p>" + f.desc + "</p>" +
+      (val ? '<p class="val">' + val + "</p>" : "") +
+      (f.values ? '<p class="vals">Values: ' + f.values + "</p>" : "") +
+      '<p class="vals">Evidence: ' + f.evText + "</p>";
+  }
+
+  const ctlFor = {};
+  document.querySelectorAll("[data-fields]").forEach((el) => {
+    el.dataset.fields.split(" ").forEach((k) => (ctlFor[k] = ctlFor[k] || []).push(el));
+  });
+  ctlFor.mode2 = ctlFor.mode2 || ctlFor.mode;
+
+  let lit = [];
+  function clearHl() { lit.forEach((el) => el.classList.remove("hl", "hlb")); lit = []; }
+  function lightField(k) {
+    document.querySelectorAll('[data-field="' + k + '"]').forEach((el) => { el.classList.add("hl"); lit.push(el); });
+    (ctlFor[k] || []).forEach((el) => { el.classList.add("hl"); lit.push(el); });
+    const f = FIELDS[k];
+    const bs = k === "header" ? [0, 1, 2, 3, 4] : (f && f.byte != null ? [f.byte] : []);
+    bs.forEach((i) => { hexChips[i].classList.add("hl"); lit.push(hexChips[i]); });
+  }
+  function lightByte(i) {
+    document.querySelectorAll('[data-byte="' + i + '"]').forEach((el) => { el.classList.add("hlb"); lit.push(el); });
+    rows[i].classList.add("hlb"); lit.push(rows[i]);
+  }
+  function target(e) {
+    const el = e.target.closest ? e.target.closest("[data-field], [data-fields], [data-byte]") : null;
+    if (!el) return null;
+    if (el.dataset.field) return { kind: "field", keys: [el.dataset.field] };
+    if (el.dataset.fields) return { kind: "field", keys: el.dataset.fields.split(" ") };
+    return { kind: "byte", key: el.dataset.byte };
+  }
+  function enter(e) {
+    const t = target(e);
+    clearHl();
+    if (!t) return;
+    if (t.kind === "byte") { lightByte(Number(t.key)); show("byte", t.key); }
+    else { t.keys.forEach(lightField); show("field", t.keys[0]); }
+  }
+  document.addEventListener("pointerover", enter);
+  document.addEventListener("focusin", enter);
+  document.addEventListener("pointerout", (e) => { if (!e.relatedTarget || !e.relatedTarget.closest || !e.relatedTarget.closest("[data-field], [data-fields], [data-byte]")) clearHl(); });
+
+  // ---- events ----
+  function apply(fn, arg) {
+    const prev = bytes.slice();
+    notes = [];
+    fn(arg);
+    status = "Edited";
+    render(prev);
+  }
+  document.querySelectorAll('.seg input[type="radio"]').forEach((el) =>
+    el.addEventListener("change", () => apply(set[el.name], el.value)));
+  $("temp").addEventListener("input", (e) => apply(set.temp, e.target.value));
+  ["isee", "clean", "plasma", "econo"].forEach((id) => $(id).addEventListener("change", (e) => apply(set[id], e.target.checked)));
+  ["offOn", "onOn"].forEach((id) => $(id).addEventListener("change", (e) => apply(set[id], e.target.checked)));
+  ["clock", "offTime", "onTime"].forEach((id) => $(id).addEventListener("change", (e) => apply(set[id], e.target.value)));
+
+  function load(text, label) {
+    const msg = $("loadMsg");
+    try {
+      const { state: s, warn } = decode(parseHex(text));
+      const prev = bytes.slice();
+      state = s; notes = []; status = label || "Decoded frame";
+      render(prev);
+      const same = bytes.map(hex2).join("") === parseHex(text).map(hex2).join("");
+      msg.className = "msg " + (warn.length || !same ? "warn" : "ok");
+      msg.textContent = warn.length ? warn.join(" ") : (same ? "Loaded. The rebuilt frame matches byte for byte." : "Loaded. The rebuilt frame differs from the input.");
+    } catch (err) {
+      msg.className = "msg err";
+      msg.textContent = err.message;
+    }
+  }
+  document.querySelectorAll("[data-preset]").forEach((b) =>
+    b.addEventListener("click", () => { const c = CAPTURES[b.dataset.preset]; $("paste").value = c.hex; load(c.hex, c.label); }));
+  $("decodeBtn").addEventListener("click", () => load($("paste").value));
+  $("paste").addEventListener("keydown", (e) => { if (e.key === "Enter") load($("paste").value); });
+
+  $("copyBtn").addEventListener("click", () => {
+    const text = $("hexText").textContent;
+    const done = (m) => { $("copyMsg").textContent = m; };
+    const fallback = () => {
+      const code = $("hexText");
+      code.hidden = false;
+      const r = document.createRange(); r.selectNodeContents(code);
+      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      done("Selected. Press Ctrl+C or ⌘C to copy.");
+    };
+    try {
+      navigator.clipboard.writeText(text).then(() => done("Copied."), fallback);
+    } catch (err) { fallback(); }
+  });
+
+  // Self-check: the encoder rebuilds the three captures.
+  Object.entries(CAPTURES).forEach(([k, c]) => {
+    const b = parseHex(c.hex);
+    console.assert(encode(decode(b).state).every((v, i) => v === b[i]), "capture " + k + " does not round-trip");
+  });
+
+  render(null);
+  show("field", "area");
+})();
+</script>
+
+</body></html>

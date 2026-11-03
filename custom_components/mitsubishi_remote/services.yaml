@@ -1,8 +1,8 @@
 force_send:
   name: Force send IR command
   description: >-
-    Encode and send a Mitsubishi IR frame without changing the climate entity
-    state. Useful for testing a combination before trusting the UI.
+    Encode and send one Mitsubishi IR frame. The climate entity state does
+    not change. Use it to test a setting before you rely on the UI.
   target:
     entity:
       integration: mitsubishi_remote
@@ -10,7 +10,7 @@ force_send:
   fields:
     hvac_mode:
       name: HVAC mode
-      description: Operating mode.
+      description: Operation mode.
       required: true
       default: cool
       selector:
@@ -35,9 +35,8 @@ force_send:
     fan_mode:
       name: Fan mode
       description: >-
-        Fan speed. Values are Home Assistant's climate vocabulary so the UI
-        shows the right icon; the older "Med"/"High" spellings are still
-        accepted. The vertical vane is left at Auto for this diagnostic call.
+        Fan speed. VANE (up/down airflow) is Auto for this diagnostic call.
+        The other settings keep the entity's current state.
       required: false
       default: auto
       selector:
@@ -47,6 +46,7 @@ force_send:
             - low
             - medium
             - high
+            - super_high
     power:
       name: Power
       description: Power on/off bit.

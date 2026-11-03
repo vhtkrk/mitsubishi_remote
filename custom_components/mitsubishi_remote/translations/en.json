@@ -1,0 +1,43 @@
+{
+  "entity": {
+    "climate": {
+      "mitsubishi_ac": {
+        "state_attributes": {
+          "fan_mode": {
+            "state": {
+              "auto": "Auto",
+              "low": "Low",
+              "medium": "Medium",
+              "high": "High",
+              "super_high": "Super high"
+            }
+          },
+          "swing_mode": {
+            "state": {
+              "auto": "Auto",
+              "pos1": "1 (highest)",
+              "pos2": "2",
+              "pos3": "3",
+              "pos4": "4",
+              "pos5": "5 (lowest)",
+              "swing": "Swing"
+            }
+          },
+          "swing_horizontal_mode": {
+            "state": {
+              "area_auto": "i-see area: auto",
+              "area_left": "i-see area: left",
+              "area_right": "i-see area: right",
+              "far_left": "Far left",
+              "left": "Left",
+              "center": "Center",
+              "right": "Right",
+              "far_right": "Far right",
+              "swing": "Swing"
+            }
+          }
+        }
+      }
+    }
+  }
+}

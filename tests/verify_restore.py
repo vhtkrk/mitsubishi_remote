@@ -1,17 +1,19 @@
-"""Regression: state restoration after reboot (last turn's work) still holds."""
+"""Regression: state restoration after a restart, and the power-off frame."""
 
 import asyncio
 import json
 import sys
 from pathlib import Path
 
-CC = Path("/home/user/mitsubishi_remote/custom_components/mitsubishi_remote")
-sys.path.insert(0, str(CC.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from homeassistant.components.climate import HVACMode  # noqa: E402
 from homeassistant.helpers.restore_state import RestoredExtraData  # noqa: E402
 
-from mitsubishi_remote import climate as C  # noqa: E402
+from custom_components.mitsubishi_remote import climate as C  # noqa: E402
+
+MODE_FIELD = 0x38  # byte 6 bits 5-3 (IR_PROTOCOL.md §3.3)
+HEAT = 0x08
 
 ok = True
 
@@ -38,8 +40,7 @@ class State:
 
 def make(**kw):
     e = C.MitsubishiRemoteClimate(
-        remote_entity="remote.tuya", name="AC", command_format="hex",
-        hex_prefix=False, retries=1, repeat_gap=0.0,
+        remote_entity="remote.tuya", name="AC", retries=1, repeat_gap=0.0,
     )
     e.hass = type("H", (), {"data": {}})()
     e.entity_id = "climate.ac"
@@ -75,7 +76,8 @@ async def main():
     check("default mode off", e._attr_hvac_mode == HVACMode.OFF)
     check("default temp 24", e._attr_target_temperature == 24)
     check("default fan auto", e._attr_fan_mode == "auto", e._attr_fan_mode)
-    check("default swing off", e._attr_swing_mode == "off")
+    check("default swing auto", e._attr_swing_mode == "auto")
+    check("default swing_horizontal area_auto", e._attr_swing_horizontal_mode == "area_auto")
     check("no IR on first run", e.sent == [])
 
     # 2. full restore from extra data, no IR
@@ -83,13 +85,15 @@ async def main():
     e = make()
     await restore(e, extra=Extra({
         "active_mode": "heat", "hvac_mode": "heat", "target_temperature": 23,
-        "fan_mode": "high", "swing_mode": "on",
+        "fan_mode": "high", "swing_mode": "pos4", "swing_horizontal_mode": "left",
     }))
     check("mode restored", e._attr_hvac_mode == HVACMode.HEAT, e._attr_hvac_mode)
     check("active_mode restored", e._active_mode == HVACMode.HEAT)
     check("temp restored", e._attr_target_temperature == 23)
     check("fan restored", e._attr_fan_mode == "high")
-    check("swing restored", e._attr_swing_mode == "on")
+    check("swing restored", e._attr_swing_mode == "pos4")
+    check("swing_horizontal restored", e._attr_swing_horizontal_mode == "left")
+    check("last WIDE_VANE follows a non-AREA choice", e._last_wide_vane == "left")
     check("power restored to on", e._power is True)
     check("restore sent no IR", e.sent == [])
 
@@ -104,7 +108,7 @@ async def main():
     check("power flag off", e._power is False)
     check("active mode still heat", e._active_mode == HVACMode.HEAT)
     await e.async_set_hvac_mode(HVACMode.HEAT)
-    check("power-on frame is heat", e.sent and e.sent[-1][6] & 0x0F == 0x08,
+    check("power-on frame is heat", e.sent and e.sent[-1][6] & MODE_FIELD == HEAT,
           hex(e.sent[-1][6]) if e.sent else "no frame")
 
     # 4. fallback to old-style last_state attributes only
@@ -130,14 +134,14 @@ async def main():
     check("temp clamped to max", e._attr_target_temperature == 31,
           e._attr_target_temperature)
     check("bad fan -> default", e._attr_fan_mode == "auto")
-    check("bad swing -> default", e._attr_swing_mode == "off")
+    check("bad swing -> default", e._attr_swing_mode == "auto")
     check("no IR", e.sent == [])
 
     # 6. non-numeric temp does not raise
     e = make()
     await restore(e, extra=Extra({
         "active_mode": "cool", "hvac_mode": "cool", "target_temperature": "warm",
-        "fan_mode": "auto", "swing_mode": "off",
+        "fan_mode": "auto", "swing_mode": "auto",
     }))
     check("bad temp text survives", e._attr_target_temperature == 24,
           e._attr_target_temperature)
@@ -149,15 +153,22 @@ async def main():
     e._attr_hvac_mode = HVACMode.HEAT
     e._attr_target_temperature = 23
     e._attr_fan_mode = "high"
-    e._attr_swing_mode = "on"
+    e._attr_swing_mode = "swing"
+    e._attr_swing_horizontal_mode = "area_right"
+    e._last_wide_vane = "far_left"
     blob = json.loads(json.dumps(e.extra_restore_state_data.as_dict()))
     check("as_dict is JSON-clean", blob["active_mode"] == "heat", blob)
     restored = RestoredExtraData(blob)
     check("RestoredExtraData round-trip", restored.as_dict() == blob)
     check("all keys present", set(blob) == {
         "active_mode", "hvac_mode", "target_temperature", "fan_mode", "swing_mode",
-        "swing_horizontal_mode",
+        "swing_horizontal_mode", "last_wide_vane",
     }, sorted(blob))
+    e2 = make()
+    await restore(e2, extra=Extra(blob))
+    check("AREA choice and hidden WIDE_VANE survive a restart",
+          e2._attr_swing_horizontal_mode == "area_right" and e2._last_wide_vane == "far_left",
+          f"{e2._attr_swing_horizontal_mode} {e2._last_wide_vane}")
 
     # 8. power-off preserves mode/temp/fan bytes (byte 5 only)
     print("-- power-off frame --")
@@ -171,8 +182,11 @@ async def main():
     await e.async_set_hvac_mode(HVACMode.OFF)
     off_frame = e.sent[-1]
     check("byte 5 power bit cleared", on_frame[5] == 0x20 and off_frame[5] == 0x00)
-    check("mode/temp/fan bytes preserved", on_frame[6:10] == off_frame[6:10],
-          f"{on_frame[6:10].hex()} vs {off_frame[6:10].hex()}")
+    check("all other bytes preserved (rule R1)",
+          on_frame[:5] + on_frame[6:17] == off_frame[:5] + off_frame[6:17],
+          f"{on_frame.hex()} vs {off_frame.hex()}")
+    check("OFF frame carries CLEAN (rule R8)", off_frame[14] & 0x04 == 0x04,
+          hex(off_frame[14]))
 
     # 9. cool -> heat retags the mode byte
     print("-- mode switch ordering --")
@@ -181,7 +195,7 @@ async def main():
     e._active_mode = HVACMode.COOL
     e._attr_hvac_mode = HVACMode.COOL
     await e.async_set_hvac_mode(HVACMode.HEAT)
-    check("switching to heat emits heat", e.sent[-1][6] & 0x0F == 0x08,
+    check("switching to heat emits heat", e.sent[-1][6] & MODE_FIELD == HEAT,
           hex(e.sent[-1][6]))
 
     print()
