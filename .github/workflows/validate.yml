@@ -19,6 +19,10 @@ jobs:
             echo "== $t =="
             uv run --python 3.13 --with 'homeassistant==2025.1.4' python "$t"
           done
+      - name: Run the infrared test on Home Assistant 2026.10
+        run: >-
+          uv run --python 3.14 --with 'homeassistant==2026.10.4'
+          --with 'infrared-protocols==10.1.0' python tests/verify_infrared.py
 
   hassfest:
     name: hassfest

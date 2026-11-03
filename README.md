@@ -1,12 +1,15 @@
 # mitsubishi_remote
 
-A Home Assistant integration for the Mitsubishi Electric MSZ-FD25VA and MSZ-FD35VA air conditioners. It sends IR commands through an existing LocalTuyaIR (`localtuya_rc`) `remote` entity, for example a Nedis WIFIRC10CBK blaster, so the blaster keeps its firmware. The integration adds one `climate` entity and three switches.
+A Home Assistant integration for the Mitsubishi Electric MSZ-FD25VA and MSZ-FD35VA air conditioners. It adds one `climate` entity and three switches, and sends IR commands through a transmitter that Home Assistant already controls:
+
+- A LocalTuyaIR (`localtuya_rc`) `remote` entity, for example a Nedis WIFIRC10CBK blaster. The blaster keeps its firmware.
+- An `infrared` entity (Home Assistant 2026.5 or later). In Home Assistant 2026.10, the Broadlink, ESPHome, MQTT, SMLIGHT and ZHA integrations provide these entities.
 
 [IR_PROTOCOL.md](IR_PROTOCOL.md) describes the IR frame byte by byte, with the sources and an evidence level for each value. The encoder in `mitsubishi_protocol.py` follows that document.
 
 ## Install
 
-The integration needs Home Assistant 2024.12 or later.
+The integration needs Home Assistant 2024.12 or later. The `infrared_entity` option needs Home Assistant 2026.5 or later.
 
 ### With HACS
 
@@ -30,19 +33,25 @@ Add a `climate` platform entry to `configuration.yaml`. The integration creates 
 climate:
   - platform: mitsubishi_remote
     name: Bedroom AC
-    remote_entity: remote.localtuya_ir   # your LocalTuyaIR remote entity
+    remote_entity: remote.localtuya_ir   # your LocalTuyaIR remote entity, or:
+    # infrared_entity: infrared.ir_blaster   # your infrared entity
     retries: 3                            # send each command 3 times
     repeat_gap: 0.35                      # seconds between the sends
     install_position: center              # left | center | right
 ```
 
+Set exactly one of `remote_entity` and `infrared_entity`.
+
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `remote_entity` | required | The entity ID of the LocalTuyaIR remote. |
+| `remote_entity` | none | The entity ID of a LocalTuyaIR remote. |
+| `infrared_entity` | none | The entity ID of an `infrared` entity. Needs Home Assistant 2026.5 or later. |
 | `name` | `Mitsubishi AC` | The name of the climate entity. |
 | `retries` | `2` | How many times to send each command. Tuya blasters sometimes drop one. |
 | `repeat_gap` | `0.35` | Seconds between the sends. |
 | `install_position` | `center` | Where the indoor unit hangs on the wall: `left`, `center` or `right`. Use the position of the slide switch in the original remote. `middle` also works. |
+
+A LocalTuyaIR blaster gets the same pulses through both options. The unique ID of the climate entity comes from the transmitter entity ID. If you change the transmitter, Home Assistant creates a new climate entity. Remove the old entity in Settings → Devices & services → Entities.
 
 ## Entities
 
@@ -104,7 +113,8 @@ The `command_format` and `hex_prefix` options are gone, because the integration 
 ## Limitations
 
 - The IR link is one-way. The entity shows the state that Home Assistant sent, and it does not see changes made with the handheld remote.
-- Only LocalTuyaIR `remote` entities work. The integration sends each frame as a `raw:` timing list through `remote.send_command`. That string format belongs to LocalTuyaIR. Other `remote` integrations expect their own formats (for example, Broadlink expects base64 packets).
+- `remote_entity` works only with LocalTuyaIR. The integration sends each frame as a `raw:` timing list through `remote.send_command`, and that string format belongs to LocalTuyaIR. Other `remote` integrations expect their own formats (for example, Broadlink expects base64 packets). For other transmitters, use `infrared_entity`.
+- Nobody has tried `infrared_entity` with a real transmitter yet. The tests send frames through the `infrared` component of Home Assistant to a test emitter.
 - The integration does not expose the timers or ECONO COOL. Section 6 of IR_PROTOCOL.md lists what is still unknown about the protocol.
 
 ## Development
@@ -112,7 +122,7 @@ The `command_format` and `hex_prefix` options are gone, because the integration 
 | File | Role |
 | --- | --- |
 | `mitsubishi_protocol.py` | Builds the 18-byte frame and the raw timing list. |
-| `climate.py` | The entry point of the YAML platform. It creates the climate entity, registers `force_send` and passes the switches to the switch platform. |
+| `climate.py` | The entry point of the YAML platform. It creates the climate entity, sends the frames, registers `force_send` and passes the switches to the switch platform. |
 | `switch.py` | The I-See, Clean and Plasma switches. |
 
 For a YAML platform, Home Assistant calls `async_setup_platform` in `climate.py` and never uses `__init__.py` for setup. Keep the setup code in `climate.py`.

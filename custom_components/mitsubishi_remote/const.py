@@ -4,7 +4,8 @@ DOMAIN = "mitsubishi_remote"
 
 # Configuration keys
 CONF_NAME = "name"
-CONF_REMOTE_ENTITY = "remote_entity"
+CONF_REMOTE_ENTITY = "remote_entity"        # LocalTuyaIR remote entity
+CONF_INFRARED_ENTITY = "infrared_entity"    # infrared entity (HA 2026.5+)
 CONF_RETRIES = "retries"                    # how many times to send a command
 CONF_REPEAT_GAP = "repeat_gap"              # seconds between retries
 CONF_INSTALL_POSITION = "install_position"  # slide switch in the remote (byte 14)

@@ -1,4 +1,4 @@
-"""Mitsubishi MSZ-FD AC control through an existing Home Assistant remote entity.
+"""Mitsubishi MSZ-FD AC control through an existing Home Assistant remote or infrared entity.
 
 This is a YAML `climate` platform:
 
@@ -8,10 +8,12 @@ This is a YAML `climate` platform:
         remote_entity: remote.localtuya_ir
         retries: 3
 
-The integration encodes Mitsubishi IR frames and sends them through the
-`remote.send_command` service of a LocalTuyaIR remote entity. It adds a
-`climate` entity (mode, set temperature, fan, airflow) and three switches.
-IR_PROTOCOL.md in the repository root describes the frame.
+The integration encodes Mitsubishi IR frames. It sends them through the
+`remote.send_command` service of a LocalTuyaIR remote entity
+(`remote_entity`), or through an `infrared` entity (`infrared_entity`, Home
+Assistant 2026.5 or later). It adds a `climate` entity (mode, set
+temperature, fan, airflow) and three switches. IR_PROTOCOL.md in the
+repository root describes the frame.
 
 It also registers a debug service:
 

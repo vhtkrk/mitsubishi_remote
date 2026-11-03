@@ -10,6 +10,7 @@ from datetime import datetime, time
 from enum import IntEnum
 
 HEADER = (0x23, 0xCB, 0x26, 0x01, 0x00)  # bytes 0-4 (§3.1)
+CARRIER_HZ = 38_000  # §1
 
 MIN_TEMP = 16
 MAX_TEMP = 31

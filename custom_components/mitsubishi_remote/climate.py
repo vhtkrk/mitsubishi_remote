@@ -1,4 +1,4 @@
-"""Climate entity that drives a Mitsubishi MSZ-FD AC through a Home Assistant remote entity.
+"""Climate entity that drives a Mitsubishi MSZ-FD AC through a Home Assistant remote or infrared entity.
 
 IR_PROTOCOL.md in the repository root specifies the frame. The rules R1-R13
 that this module follows are in §4 of that document.
@@ -7,6 +7,7 @@ that this module follows are in §4 of that document.
 from __future__ import annotations
 
 import asyncio
+from functools import partial
 import logging
 from typing import Any
 
@@ -20,6 +21,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
 
 from .const import (
+    CONF_INFRARED_ENTITY,
     CONF_INSTALL_POSITION,
     CONF_NAME,
     CONF_REMOTE_ENTITY,
@@ -37,6 +39,7 @@ from .const import (
     SERVICE_FORCE_SEND,
 )
 from .mitsubishi_protocol import (
+    CARRIER_HZ,
     Area,
     Fan,
     InstallPos,
@@ -162,6 +165,23 @@ def _mode_value(mode: Any) -> str | None:
     return mode.value if isinstance(mode, HVACMode) else str(mode)
 
 
+def _infrared_command(timings: list[int]) -> Any:
+    """Wrap a timing list from modulate() as a command for the infrared platform.
+
+    The import is here, so that the module still loads on Home Assistant
+    versions without the infrared platform.
+    """
+    from infrared_protocols.commands import Command
+
+    class MitsubishiCommand(Command):
+        def get_raw_timings(self) -> list[int]:
+            # The platform wants each mark as a positive value and each space
+            # as a negative value. modulate() alternates them, mark first.
+            return [-t if i % 2 else t for i, t in enumerate(timings)]
+
+    return MitsubishiCommand(modulation=CARRIER_HZ)
+
+
 class MitsubishiExtraStoredData(ExtraStoredData):
     """State that the climate attributes alone cannot carry across restarts.
 
@@ -203,7 +223,7 @@ class MitsubishiExtraStoredData(ExtraStoredData):
 
 
 class MitsubishiRemoteClimate(ClimateEntity, RestoreEntity):
-    """A climate entity that encodes Mitsubishi frames and calls remote.send_command."""
+    """A climate entity that encodes Mitsubishi frames and sends them as IR."""
 
     _attr_hvac_modes = [
         HVACMode.OFF,
@@ -230,15 +250,18 @@ class MitsubishiRemoteClimate(ClimateEntity, RestoreEntity):
     def __init__(
         self,
         *,
-        remote_entity: str,
+        remote_entity: str | None = None,
+        infrared_entity: str | None = None,
         name: str,
         retries: int,
         repeat_gap: float,
         install_position: str | None = DEFAULT_INSTALL_POSITION,
     ) -> None:
         self._remote_entity = remote_entity
+        self._infrared_entity = infrared_entity
+        transmitter = infrared_entity or remote_entity
         self._attr_name = name
-        self._attr_unique_id = f"mitsubishi_remote_{remote_entity.replace('.', '_')}"
+        self._attr_unique_id = f"mitsubishi_remote_{transmitter.replace('.', '_')}"
         self._retries = max(1, int(retries))
         self._repeat_gap = max(0.0, float(repeat_gap))
         self._install_position = normalise_install_position(install_position)
@@ -345,23 +368,38 @@ class MitsubishiRemoteClimate(ClimateEntity, RestoreEntity):
         await self._send(frame)
 
     async def _send(self, frame: bytes) -> None:
-        # LocalTuyaIR's `remote.send_command` has no built-in Mitsubishi
-        # protocol, so the frame goes out as a raw timing list.
-        payload = "raw:" + ",".join(str(p) for p in modulate(frame))
+        timings = modulate(frame)
+        if self._infrared_entity:
+            # Home Assistant 2026.5 or later. Import here, so that older
+            # versions can still use remote_entity.
+            from homeassistant.components import infrared
+
+            send = partial(
+                infrared.async_send_command,
+                self.hass,
+                self._infrared_entity,
+                _infrared_command(timings),
+                context=self._context,
+            )
+        else:
+            # LocalTuyaIR's `remote.send_command` has no built-in Mitsubishi
+            # protocol, so the frame goes out as a raw timing list.
+            send = partial(
+                self.hass.services.async_call,
+                "remote",
+                "send_command",
+                {
+                    "entity_id": self._remote_entity,
+                    "command": "raw:" + ",".join(map(str, timings)),
+                },
+                blocking=True,
+            )
 
         # Tuya IR blasters sometimes drop a transmission, so send it again
         # after a short gap.
         for attempt in range(self._retries):
             try:
-                await self.hass.services.async_call(
-                    "remote",
-                    "send_command",
-                    {
-                        "entity_id": self._remote_entity,
-                        "command": payload,
-                    },
-                    blocking=True,
-                )
+                await send()
             except Exception:  # noqa: BLE001 - log and retry
                 _LOGGER.exception(
                     "Failed to send IR command (attempt %d/%d)",
@@ -565,8 +603,20 @@ async def async_setup_platform(
     """Set up the Mitsubishi climate platform from a YAML `climate:` block."""
     from homeassistant.helpers.discovery import async_load_platform
 
+    remote_entity = config.get(CONF_REMOTE_ENTITY)
+    infrared_entity = config.get(CONF_INFRARED_ENTITY)
+    if bool(remote_entity) == bool(infrared_entity):
+        _LOGGER.error(
+            "%s: set exactly one of %s and %s",
+            DOMAIN,
+            CONF_REMOTE_ENTITY,
+            CONF_INFRARED_ENTITY,
+        )
+        return
+
     entity = MitsubishiRemoteClimate(
-        remote_entity=config[CONF_REMOTE_ENTITY],
+        remote_entity=remote_entity,
+        infrared_entity=infrared_entity,
         name=config.get(CONF_NAME, DEFAULT_NAME),
         retries=config.get(CONF_RETRIES, DEFAULT_RETRIES),
         repeat_gap=config.get(CONF_REPEAT_GAP, DEFAULT_REPEAT_GAP),
