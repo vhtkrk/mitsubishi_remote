@@ -118,3 +118,7 @@ The `command_format` and `hex_prefix` options are gone, because the integration 
 For a YAML platform, Home Assistant calls `async_setup_platform` in `climate.py` and never uses `__init__.py` for setup. Keep the setup code in `climate.py`.
 
 [tests/README.md](tests/README.md) explains how to run the tests.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The PDF and XLSX files in the repository root are third-party reference documents. The license does not cover them.
