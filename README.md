@@ -104,7 +104,7 @@ The `command_format` and `hex_prefix` options are gone, because the integration 
 ## Limitations
 
 - The IR link is one-way. The entity shows the state that Home Assistant sent, and it does not see changes made with the handheld remote.
-- The integration sends each frame as a `raw:` timing list through `remote.send_command`, because LocalTuyaIR has no built-in Mitsubishi protocol.
+- Only LocalTuyaIR `remote` entities work. The integration sends each frame as a `raw:` timing list through `remote.send_command`. That string format belongs to LocalTuyaIR. Other `remote` integrations expect their own formats (for example, Broadlink expects base64 packets).
 - The integration does not expose the timers or ECONO COOL. Section 6 of IR_PROTOCOL.md lists what is still unknown about the protocol.
 
 ## Development

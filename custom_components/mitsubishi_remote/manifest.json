@@ -1,6 +1,7 @@
 {
   "domain": "mitsubishi_remote",
   "name": "Mitsubishi MSZ-FD AC (IR remote)",
+  "categories": ["climate.heat_pumps_air_conditioning"],
   "codeowners": ["@vhtkrk"],
   "config_flow": false,
   "documentation": "https://github.com/vhtkrk/mitsubishi_remote",
